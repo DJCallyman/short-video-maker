@@ -25,7 +25,6 @@ import {
   RenderConfig,
   MusicMoodEnum,
   CaptionPositionEnum,
-  VoiceEnum,
   OrientationEnum,
   MusicVolumeEnum,
 } from "../../types/shorts";
@@ -45,14 +44,14 @@ const VideoCreator: React.FC = () => {
     music: MusicMoodEnum.chill,
     captionPosition: CaptionPositionEnum.bottom,
     captionBackgroundColor: "blue",
-    voice: VoiceEnum.af_heart,
+    voice: "", // We will set the default voice after fetching the list
     orientation: OrientationEnum.portrait,
     musicVolume: MusicVolumeEnum.high,
   });
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [voices, setVoices] = useState<VoiceEnum[]>([]);
+  const [voices, setVoices] = useState<string[]>([]);
   const [musicTags, setMusicTags] = useState<MusicMoodEnum[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
 
@@ -64,8 +63,14 @@ const VideoCreator: React.FC = () => {
           axios.get("/api/music-tags"),
         ]);
 
-        setVoices(voicesResponse.data);
+        const fetchedVoices = voicesResponse.data || [];
+        setVoices(fetchedVoices);
         setMusicTags(musicResponse.data);
+        
+        // Set the default voice to the first one in the fetched list
+        if (fetchedVoices.length > 0) {
+          setConfig(prevConfig => ({ ...prevConfig, voice: fetchedVoices[0] }));
+        }
       } catch (err) {
         console.error("Failed to fetch options:", err);
         setError(
@@ -312,7 +317,7 @@ const VideoCreator: React.FC = () => {
                   label="Default Voice"
                   required
                 >
-                  {Object.values(VoiceEnum).map((voice) => (
+                  {voices.map((voice) => (
                     <MenuItem key={voice} value={voice}>
                       {voice}
                     </MenuItem>

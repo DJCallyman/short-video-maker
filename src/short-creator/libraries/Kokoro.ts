@@ -4,18 +4,16 @@ import {
   type kokoroModelPrecision,
   type Voices,
 } from "../../types/shorts";
+import { TTSService, TTSResult } from "./TTSService"; // Import the interface
 import { KOKORO_MODEL, logger } from "../../config";
 
-export class Kokoro {
+export class Kokoro implements TTSService { // Implement the interface
   constructor(private tts: KokoroTTS) {}
 
   async generate(
     text: string,
     voice: Voices,
-  ): Promise<{
-    audio: ArrayBuffer;
-    audioLength: number;
-  }> {
+  ): Promise<TTSResult> { // Match the interface return type
     const splitter = new TextSplitterStream();
     const stream = this.tts.stream(splitter, {
       voice,

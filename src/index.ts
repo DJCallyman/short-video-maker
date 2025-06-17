@@ -2,7 +2,6 @@
 import path from "path";
 import fs from "fs-extra";
 
-import { Kokoro } from "./short-creator/libraries/Kokoro";
 import { Remotion } from "./short-creator/libraries/Remotion";
 import { Whisper } from "./short-creator/libraries/Whisper";
 import { FFMpeg } from "./short-creator/libraries/FFmpeg";
@@ -12,6 +11,9 @@ import { ShortCreator } from "./short-creator/ShortCreator";
 import { logger } from "./logger";
 import { Server } from "./server/server";
 import { MusicManager } from "./short-creator/music";
+import { Kokoro } from "./short-creator/libraries/Kokoro";
+import { VeniceAI } from "./short-creator/libraries/VeniceAI";
+import { TTSService } from "./short-creator/libraries/TTSService";
 
 async function main() {
   const config = new Config();
@@ -33,8 +35,18 @@ async function main() {
 
   logger.debug("initializing remotion");
   const remotion = await Remotion.init(config);
-  logger.debug("initializing kokoro");
-  const kokoro = await Kokoro.init(config.kokoroModelPrecision);
+  
+  let ttsService: TTSService;
+
+  if (config.ttsProvider === 'venice') {
+    logger.debug("Initializing Venice AI TTS service");
+    ttsService = new VeniceAI(config.veniceApiKey!);
+  } else {
+    logger.debug("Initializing Kokoro TTS service");
+    const kokoroInstance = await Kokoro.init(config.kokoroModelPrecision);
+    ttsService = kokoroInstance;
+  }
+
   logger.debug("initializing whisper");
   const whisper = await Whisper.init(config);
   logger.debug("initializing ffmpeg");
@@ -45,7 +57,7 @@ async function main() {
   const shortCreator = new ShortCreator(
     config,
     remotion,
-    kokoro,
+    ttsService, // Pass the generic TTS service
     whisper,
     ffmpeg,
     pexelsApi,
@@ -53,7 +65,6 @@ async function main() {
   );
 
   if (!config.runningInDocker) {
-    // the project is running with npm - we need to check if the installation is correct
     if (fs.existsSync(config.installationSuccessfulPath)) {
       logger.info("the installation is successful - starting the server");
     } else {
@@ -61,7 +72,13 @@ async function main() {
         "testing if the installation was successful - this may take a while...",
       );
       try {
-        const audioBuffer = (await kokoro.generate("hi", "af_heart")).audio;
+        const availableVoices = ttsService.listAvailableVoices();
+        if (availableVoices.length === 0) {
+          throw new Error(`No voices available for the selected TTS provider ('${config.ttsProvider}').`);
+        }
+        const testVoice = availableVoices[0];
+        const { audio: audioBuffer } = await ttsService.generate("hi", testVoice);
+
         await ffmpeg.createMp3DataUri(audioBuffer);
         await pexelsApi.findVideo(["dog"], 2.4);
         const testVideoPath = path.join(config.tempDirPath, "test.mp4");
