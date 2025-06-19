@@ -45,6 +45,8 @@ export class Config {
   public devMode: boolean;
   public whisperVersion: string = whisperVersion;
   public whisperModel: whisperModels = defaultWhisperModel;
+  public ttsProvider: "kokoro" | "venice";
+  public veniceApiKey?: string;
   public kokoroModelPrecision: kokoroModelPrecision = "fp32";
 
   // docker-specific, performance-related settings to prevent memory issues
@@ -84,10 +86,16 @@ export class Config {
     if (process.env.WHISPER_MODEL) {
       this.whisperModel = process.env.WHISPER_MODEL as whisperModels;
     }
-    if (process.env.KOKORO_MODEL_PRECISION) {
+if (process.env.KOKORO_MODEL_PRECISION) {
       this.kokoroModelPrecision = process.env
         .KOKORO_MODEL_PRECISION as kokoroModelPrecision;
     }
+
+    this.ttsProvider = (process.env.TTS_PROVIDER as "kokoro" | "venice") || "kokoro";
+    this.veniceApiKey = process.env.VENICE_API_KEY;
+
+    console.log(`[DEBUG] TTS_PROVIDER from env: ${process.env.TTS_PROVIDER}`);
+    console.log(`[DEBUG] Configured ttsProvider: ${this.ttsProvider}`);
 
     this.concurrency = process.env.CONCURRENCY
       ? parseInt(process.env.CONCURRENCY)
@@ -101,6 +109,12 @@ export class Config {
   }
 
   public ensureConfig() {
+if (this.ttsProvider === 'venice' && !this.veniceApiKey) {
+      throw new Error(
+        "TTS_PROVIDER is set to 'venice', but VENICE_API_KEY environment variable is missing.",
+      );
+    }
+
     if (!this.pexelsApiKey) {
       throw new Error(
         "PEXELS_API_KEY environment variable is missing. Get your free API key: https://www.pexels.com/api/key/ - see how to run the project: https://github.com/gyoridavid/short-video-maker",

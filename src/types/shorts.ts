@@ -104,10 +104,9 @@ export const renderConfig = z.object({
     .describe(
       "Background color of the caption, a valid css color, default is blue",
     ),
-  voice: z
-    .nativeEnum(VoiceEnum)
-    .optional()
-    .describe("Voice to be used for the speech, default is af_heart"),
+  voice: z.string().optional().describe(
+    "Voice to be used for the speech"
+  ),
   orientation: z
     .nativeEnum(OrientationEnum)
     .optional()
