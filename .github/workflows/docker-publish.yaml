@@ -33,4 +33,4 @@ jobs:
           # This points to your custom Dockerfile name
           file: ./main.dockerfile
           # This tags the image correctly for your ghcr.io repository
-          tags: ghcr.io/${{ github.repository_owner }}/short-video-creator:latest
+          tags: ghcr.io/djcallyman/movie_guess_app:latest
