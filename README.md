@@ -97,20 +97,6 @@ Shorts Creator takes simple text inputs and search terms, then:
 - ≥ 2 vCPU
 - ≥ 5gb disc space
 
-# NPM
-
-While Docker is the recommended way to run the project, you can run it with npm or npx.
-On top of the general requirements, the following are necessary to run the server.
-
-## Supported platforms
-
-- Ubuntu ≥ 22.04 (libc 2.5 for Whisper.cpp)
-  - Required packages: `git wget cmake ffmpeg curl make libsdl2-dev libnss3 libdbus-1-3 libatk1.0-0 libgbm-dev libasound2 libxrandr2 libxkbcommon-dev libxfixes3 libxcomposite1 libxdamage1 libatk-bridge2.0-0 libpango-1.0-0 libcairo2 libcups2`
-- Mac OS
-  - ffmpeg (`brew install ffmpeg`)
-  - node.js (tested on 22+)
-
-Windows is **NOT** supported at the moment (whisper.cpp installation fails occasionally).
 
 # Concepts
 
@@ -183,6 +169,21 @@ services:
 ```
 
 If you are using the [Self-hosted AI starter kit](https://github.com/n8n-io/self-hosted-ai-starter-kit) you want to add `networks: ['demo']` to the\*\* `short-video-maker` service so you can reach it with http://short-video-maker:3123 in n8n.
+
+# NPM
+
+While Docker is the recommended way to run the project, you can run it with npm or npx.
+On top of the general requirements, the following are necessary to run the server.
+
+## Supported platforms
+
+- Ubuntu ≥ 22.04 (libc 2.5 for Whisper.cpp)
+  - Required packages: `git wget cmake ffmpeg curl make libsdl2-dev libnss3 libdbus-1-3 libatk1.0-0 libgbm-dev libasound2 libxrandr2 libxkbcommon-dev libxfixes3 libxcomposite1 libxdamage1 libatk-bridge2.0-0 libpango-1.0-0 libcairo2 libcups2`
+- Mac OS
+  - ffmpeg (`brew install ffmpeg`)
+  - node.js (tested on 22+)
+
+Windows is **NOT** supported at the moment (whisper.cpp installation fails occasionally).
 
 # Web UI
 
