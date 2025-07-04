@@ -17,6 +17,13 @@ import {
   IconButton,
   Divider,
   InputAdornment,
+  RadioGroup,
+  FormControlLabel,
+  Radio,
+  Collapse,
+  List,
+  ListItem,
+  ListItemText,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -31,7 +38,13 @@ import {
 
 interface SceneFormData {
   text: string;
-  searchTerms: string; // Changed to string
+  searchTerms: string;
+}
+
+interface PlexMovie {
+  id: string;
+  title: string;
+  year: number;
 }
 
 const VideoCreator: React.FC = () => {
@@ -44,7 +57,7 @@ const VideoCreator: React.FC = () => {
     music: MusicMoodEnum.chill,
     captionPosition: CaptionPositionEnum.bottom,
     captionBackgroundColor: "blue",
-    voice: "", // We will set the default voice after fetching the list
+    voice: "",
     orientation: OrientationEnum.portrait,
     musicVolume: MusicVolumeEnum.high,
   });
@@ -54,6 +67,11 @@ const VideoCreator: React.FC = () => {
   const [voices, setVoices] = useState<string[]>([]);
   const [musicTags, setMusicTags] = useState<MusicMoodEnum[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
+  const [videoSource, setVideoSource] = useState("pexels");
+  const [plexMovies, setPlexMovies] = useState<PlexMovie[]>([]);
+  const [selectedPlexMovie, setSelectedPlexMovie] = useState<string | null>(null);
+  const [loadingPlexMovies, setLoadingPlexMovies] = useState(false);
+  const [plexSearch, setPlexSearch] = useState("");
 
   useEffect(() => {
     const fetchOptions = async () => {
@@ -62,27 +80,45 @@ const VideoCreator: React.FC = () => {
           axios.get("/api/voices"),
           axios.get("/api/music-tags"),
         ]);
-
         const fetchedVoices = voicesResponse.data || [];
         setVoices(fetchedVoices);
         setMusicTags(musicResponse.data);
-        
-        // Set the default voice to the first one in the fetched list
         if (fetchedVoices.length > 0) {
-          setConfig(prevConfig => ({ ...prevConfig, voice: fetchedVoices[0] }));
+          setConfig((prevConfig) => ({
+            ...prevConfig,
+            voice: fetchedVoices[0],
+          }));
         }
       } catch (err) {
         console.error("Failed to fetch options:", err);
         setError(
-          "Failed to load voices and music options. Please refresh the page.",
+          "Failed to load voices and music options. Please refresh the page."
         );
       } finally {
         setLoadingOptions(false);
       }
     };
-
     fetchOptions();
   }, []);
+
+  useEffect(() => {
+    if (videoSource === "plex") {
+      fetchPlexMovies();
+    }
+  }, [videoSource]);
+
+  const fetchPlexMovies = async () => {
+    setLoadingPlexMovies(true);
+    try {
+      const response = await axios.get("/api/plex/movies");
+      setPlexMovies(response.data.movies || []);
+    } catch (err) {
+      setError("Failed to fetch Plex movies.");
+      console.error(err);
+    } finally {
+      setLoadingPlexMovies(false);
+    }
+  };
 
   const handleAddScene = () => {
     setScenes([...scenes, { text: "", searchTerms: "" }]);
@@ -99,7 +135,7 @@ const VideoCreator: React.FC = () => {
   const handleSceneChange = (
     index: number,
     field: keyof SceneFormData,
-    value: string,
+    value: string
   ) => {
     const newScenes = [...scenes];
     newScenes[index] = { ...newScenes[index], [field]: value };
@@ -110,13 +146,17 @@ const VideoCreator: React.FC = () => {
     setConfig({ ...config, [field]: value });
   };
 
+  const handleSelectPlexMovie = (movieId: string) => {
+    setSelectedPlexMovie(movieId);
+    setConfig((prevConfig) => ({ ...prevConfig, plexMovieId: movieId }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
     try {
-      // Convert scenes to the expected API format
       const apiScenes: SceneInput[] = scenes.map((scene) => ({
         text: scene.text,
         searchTerms: scene.searchTerms
@@ -124,10 +164,16 @@ const VideoCreator: React.FC = () => {
           .map((term) => term.trim())
           .filter((term) => term.length > 0),
       }));
+      
+      const submissionConfig = {
+        ...config,
+        videoSource: videoSource as "pexels" | "plex",
+        plexMovieId: videoSource === 'plex' ? selectedPlexMovie : undefined,
+      };
 
       const response = await axios.post("/api/short-video", {
         scenes: apiScenes,
-        config,
+        config: submissionConfig,
       });
 
       navigate(`/video/${response.data.videoId}`);
@@ -138,6 +184,8 @@ const VideoCreator: React.FC = () => {
       setLoading(false);
     }
   };
+  
+  const filteredPlexMovies = plexMovies.filter(movie => movie.title.toLowerCase().includes(plexSearch.toLowerCase()));
 
   if (loadingOptions) {
     return (
@@ -166,6 +214,59 @@ const VideoCreator: React.FC = () => {
 
       <form onSubmit={handleSubmit}>
         <Typography variant="h5" component="h2" gutterBottom>
+          Video Source
+        </Typography>
+
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <FormControl component="fieldset">
+            <RadioGroup
+              row
+              value={videoSource}
+              onChange={(e) => setVideoSource(e.target.value)}
+            >
+              <FormControlLabel
+                value="pexels"
+                control={<Radio />}
+                label="Pexels"
+              />
+              <FormControlLabel
+                value="plex"
+                control={<Radio />}
+                label="Plex"
+              />
+            </RadioGroup>
+          </FormControl>
+          <Collapse in={videoSource === "plex"}>
+            <TextField
+                fullWidth
+                label="Search Plex Movies"
+                variant="outlined"
+                value={plexSearch}
+                onChange={(e) => setPlexSearch(e.target.value)}
+                sx={{ mt: 2, mb: 2 }}
+              />
+            {loadingPlexMovies ? (
+              <CircularProgress />
+            ) : (
+              <Box sx={{ maxHeight: 300, overflow: 'auto', border: '1px solid #ccc', borderRadius: 1 }}>
+                <List dense>
+                  {filteredPlexMovies.map((movie) => (
+                    <ListItem
+                      key={movie.id}
+                      button
+                      selected={selectedPlexMovie === movie.id}
+                      onClick={() => handleSelectPlexMovie(movie.id)}
+                    >
+                      <ListItemText primary={`${movie.title} (${movie.year})`} />
+                    </ListItem>
+                  ))}
+                </List>
+              </Box>
+            )}
+          </Collapse>
+        </Paper>
+
+        <Typography variant="h5" component="h2" gutterBottom>
           Scenes
         </Typography>
 
@@ -188,7 +289,6 @@ const VideoCreator: React.FC = () => {
                 </IconButton>
               )}
             </Box>
-
             <Grid container spacing={3}>
               <Grid item xs={12}>
                 <TextField
@@ -203,19 +303,20 @@ const VideoCreator: React.FC = () => {
                   required
                 />
               </Grid>
-
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Search Terms (comma-separated)"
-                  value={scene.searchTerms}
-                  onChange={(e) =>
-                    handleSceneChange(index, "searchTerms", e.target.value)
-                  }
-                  helperText="Enter keywords for background video, separated by commas"
-                  required
-                />
-              </Grid>
+              {videoSource === 'pexels' && (
+                <Grid item xs={12}>
+                  <TextField
+                    fullWidth
+                    label="Search Terms (comma-separated)"
+                    value={scene.searchTerms}
+                    onChange={(e) =>
+                      handleSceneChange(index, "searchTerms", e.target.value)
+                    }
+                    helperText="Enter keywords for background video, separated by commas"
+                    required
+                  />
+                </Grid>
+              )}
             </Grid>
           </Paper>
         ))}
@@ -256,7 +357,6 @@ const VideoCreator: React.FC = () => {
                 required
               />
             </Grid>
-
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth>
                 <InputLabel>Music Mood</InputLabel>
@@ -274,7 +374,6 @@ const VideoCreator: React.FC = () => {
                 </Select>
               </FormControl>
             </Grid>
-
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth>
                 <InputLabel>Caption Position</InputLabel>
@@ -294,7 +393,6 @@ const VideoCreator: React.FC = () => {
                 </Select>
               </FormControl>
             </Grid>
-
             <Grid item xs={12} sm={6}>
               <TextField
                 fullWidth
@@ -307,7 +405,6 @@ const VideoCreator: React.FC = () => {
                 required
               />
             </Grid>
-
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth>
                 <InputLabel>Default Voice</InputLabel>
@@ -325,7 +422,6 @@ const VideoCreator: React.FC = () => {
                 </Select>
               </FormControl>
             </Grid>
-
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth>
                 <InputLabel>Orientation</InputLabel>
@@ -345,7 +441,6 @@ const VideoCreator: React.FC = () => {
                 </Select>
               </FormControl>
             </Grid>
-
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth>
                 <InputLabel>Volume of the background audio</InputLabel>
@@ -374,7 +469,7 @@ const VideoCreator: React.FC = () => {
             variant="contained"
             color="primary"
             size="large"
-            disabled={loading}
+            disabled={loading || (videoSource === "plex" && !selectedPlexMovie)}
             sx={{ minWidth: 200 }}
           >
             {loading ? (

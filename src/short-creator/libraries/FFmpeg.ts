@@ -90,4 +90,37 @@ export class FFMpeg {
         });
     });
   }
+  
+  async getVideoDuration(filePath: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      ffmpeg.ffprobe(filePath, (err, metadata) => {
+        if (err) {
+          logger.error(err, "Error getting video duration");
+          return reject(err);
+        }
+        resolve(metadata.format.duration || 0);
+      });
+    });
+  }
+  
+  async extractClip(inputPath: string, outputPath: string, startTime: number, duration: number): Promise<string> {
+    logger.debug({ inputPath, outputPath, startTime, duration }, "Extracting video clip");
+    return new Promise((resolve, reject) => {
+      ffmpeg(inputPath)
+        .setStartTime(startTime)
+        .setDuration(duration)
+        .outputOptions('-c:v libx264') // Ensure we use a common codec
+        .outputOptions('-preset fast')
+        .output(outputPath)
+        .on('end', () => {
+          logger.debug("Clip extraction complete");
+          resolve(outputPath);
+        })
+        .on('error', (err) => {
+          logger.error(err, "Error extracting clip");
+          reject(err);
+        })
+        .run();
+    });
+  }
 }
