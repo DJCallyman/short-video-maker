@@ -55,9 +55,9 @@ export class Remotion {
       serveUrl: this.bundled,
       outputLocation,
       inputProps: data,
-      onProgress: ({ progress }) => {
-        logger.debug(`Rendering ${id} ${Math.floor(progress * 100)}% complete`);
-      },
+      // onProgress: ({ progress }) => {
+      //   logger.debug(`Rendering ${id} ${Math.floor(progress * 100)}% complete`);
+      // },
       // preventing memory issues with docker
       concurrency: this.config.concurrency,
       offthreadVideoCacheSizeInBytes: this.config.videoCacheSizeInBytes,

@@ -129,15 +129,30 @@ export class FFMpeg {
     const crop = result.topCrop;
   
     logger.debug({ crop }, "Optimal crop determined by smartcrop.js");
-  
+    
+    // Sanitize the crop values to be integers and divisible by 2
+    const safeCrop = {
+        x: Math.round(crop.x),
+        y: Math.round(crop.y),
+        width: Math.floor(crop.width / 2) * 2,
+        height: Math.floor(crop.height / 2) * 2,
+    };
+
+    logger.debug({ safeCrop }, "Sanitized crop values for ffmpeg");
+
     return new Promise<string>((resolve, reject) => {
-      ffmpeg(inputPath)
+      const command = ffmpeg(inputPath)
         .setStartTime(startTime)
         .setDuration(duration)
-        .videoFilter(`crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}`)
+        .videoFilter(`crop=${safeCrop.width}:${safeCrop.height}:${safeCrop.x}:${safeCrop.y}`)
         .outputOptions('-c:v libx264')
         .outputOptions('-preset fast')
+        .outputOptions('-pix_fmt yuv420p') // This is the fix for the white band
         .output(outputPath)
+        .on('start', (commandLine) => {
+          logger.info({ commandLine }, "FFmpeg command started");
+          fs.writeFileSync('ffmpeg-command.log', commandLine);
+        })
         .on('end', () => {
           logger.debug("Video successfully cropped.");
           fs.unlinkSync(framePath);
@@ -147,8 +162,9 @@ export class FFMpeg {
           logger.error(err, "Error cropping video with ffmpeg");
           fs.unlinkSync(framePath);
           reject(err);
-        })
-        .run();
+        });
+        
+      command.run();
     });
   }
   

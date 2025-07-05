@@ -156,6 +156,10 @@ export class ShortCreator {
         const tempClipFileName = `${cuid()}.mp4`;
         const tempClipPath = path.join(this.config.tempDirPath, tempClipFileName);
         
+        // Log the command before executing it
+        const ffmpegCommand = `ffmpeg -i "${sourceVideoPath}" -ss ${randomStartTime} -t ${clipDuration} -vf "crop=1080:1920" -c:v libx264 -preset fast -pix_fmt yuv420p "${tempClipPath}"`;
+        fs.writeFileSync('ffmpeg-command.log', ffmpegCommand);
+
         await this.ffmpeg.smartCrop(sourceVideoPath, tempClipPath, 1080, 1920, randomStartTime, clipDuration);
         
         tempFiles.push(tempClipPath);
