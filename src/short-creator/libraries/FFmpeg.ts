@@ -1,6 +1,10 @@
 import ffmpeg from "fluent-ffmpeg";
 import { Readable } from "node:stream";
 import { logger } from "../../logger";
+import { exec } from 'child_process';
+import fs from 'fs-extra';
+import path from 'path';
+import smartcrop from 'smartcrop-sharp';
 
 export class FFMpeg {
   static async init(): Promise<FFMpeg> {
@@ -103,13 +107,58 @@ export class FFMpeg {
     });
   }
   
+  async smartCrop(inputPath: string, outputPath: string, width: number, height: number, startTime: number, duration: number): Promise<string> {
+    logger.debug({ inputPath }, "Starting smart crop");
+  
+    const framePath = path.join(path.dirname(outputPath), `temp-frame-${Date.now()}.png`);
+  
+    await new Promise<void>((resolve, reject) => {
+      ffmpeg(inputPath)
+        .setStartTime(startTime)
+        .setDuration(duration)
+        .screenshots({
+          timestamps: ['50%'],
+          filename: path.basename(framePath),
+          folder: path.dirname(framePath),
+        })
+        .on('end', () => resolve())
+        .on('error', reject);
+    });
+  
+    const result = await smartcrop.crop(framePath, { width, height });
+    const crop = result.topCrop;
+  
+    logger.debug({ crop }, "Optimal crop determined by smartcrop.js");
+  
+    return new Promise<string>((resolve, reject) => {
+      ffmpeg(inputPath)
+        .setStartTime(startTime)
+        .setDuration(duration)
+        .videoFilter(`crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}`)
+        .outputOptions('-c:v libx264')
+        .outputOptions('-preset fast')
+        .output(outputPath)
+        .on('end', () => {
+          logger.debug("Video successfully cropped.");
+          fs.unlinkSync(framePath);
+          resolve(outputPath);
+        })
+        .on('error', (err) => {
+          logger.error(err, "Error cropping video with ffmpeg");
+          fs.unlinkSync(framePath);
+          reject(err);
+        })
+        .run();
+    });
+  }
+  
   async extractClip(inputPath: string, outputPath: string, startTime: number, duration: number): Promise<string> {
     logger.debug({ inputPath, outputPath, startTime, duration }, "Extracting video clip");
     return new Promise((resolve, reject) => {
       ffmpeg(inputPath)
         .setStartTime(startTime)
         .setDuration(duration)
-        .outputOptions('-c:v libx264') // Ensure we use a common codec
+        .outputOptions('-c:v libx264')
         .outputOptions('-preset fast')
         .output(outputPath)
         .on('end', () => {

@@ -9,7 +9,7 @@ interface PlexMovie {
 
 export class PlexApi {
   private plexUrl: string;
-  private plexToken: string;
+  public plexToken: string;
 
   constructor(plexUrl: string, plexToken: string) {
     this.plexUrl = plexUrl;
@@ -42,10 +42,21 @@ export class PlexApi {
 
   async getMovieFilePath(movieId: string): Promise<string> {
     try {
-      // This part of the URL is what tells Plex to give us a streamable link
-      const streamUrl = `${this.plexUrl}/library/metadata/${movieId}?X-Plex-Token=${this.plexToken}`;
-      logger.info({ streamUrl }, "Generated Plex stream URL");
-      return streamUrl;
+      const response = await axios.get(`${this.plexUrl}/library/metadata/${movieId}`, {
+        headers: {
+          'X-Plex-Token': this.plexToken,
+          'Accept': 'application/json',
+        },
+      });
+
+      if (response.data.MediaContainer.Metadata[0].Media[0].Part[0].key) {
+        const partKey = response.data.MediaContainer.Metadata[0].Media[0].Part[0].key;
+        const streamUrl = `${this.plexUrl}${partKey}?X-Plex-Token=${this.plexToken}`;
+        logger.info({ streamUrl }, "Generated Plex stream URL");
+        return streamUrl;
+      }
+      
+      throw new Error("Could not find video key in Plex metadata");
 
     } catch (error) {
       logger.error('Error fetching movie file path from Plex:', error);

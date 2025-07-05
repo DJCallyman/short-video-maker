@@ -156,7 +156,7 @@ export class ShortCreator {
         const tempClipFileName = `${cuid()}.mp4`;
         const tempClipPath = path.join(this.config.tempDirPath, tempClipFileName);
         
-        await this.ffmpeg.extractClip(sourceVideoPath, tempClipPath, randomStartTime, clipDuration);
+        await this.ffmpeg.smartCrop(sourceVideoPath, tempClipPath, 1080, 1920, randomStartTime, clipDuration);
         
         tempFiles.push(tempClipPath);
         videoUrl = `http://localhost:${this.config.port}/api/tmp/${tempClipFileName}`;
