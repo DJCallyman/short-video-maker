@@ -14,6 +14,7 @@ import { MusicManager } from "./short-creator/music";
 import { Kokoro } from "./short-creator/libraries/Kokoro";
 import { VeniceAI } from "./short-creator/libraries/VeniceAI";
 import { TTSService } from "./short-creator/libraries/TTSService";
+import { PlexApi } from "./short-creator/libraries/PlexApi";
 
 async function main() {
   const config = new Config();
@@ -52,16 +53,18 @@ async function main() {
   logger.debug("initializing ffmpeg");
   const ffmpeg = await FFMpeg.init();
   const pexelsApi = new PexelsAPI(config.pexelsApiKey);
+  const plexApi = new PlexApi(process.env.PLEX_URL || '', process.env.PLEX_TOKEN || '');
 
   logger.debug("initializing the short creator");
   const shortCreator = new ShortCreator(
     config,
     remotion,
-    ttsService, // Pass the generic TTS service
+    ttsService,
     whisper,
     ffmpeg,
     pexelsApi,
     musicManager,
+    plexApi,
   );
 
   if (!config.runningInDocker) {
@@ -101,8 +104,6 @@ async function main() {
   logger.debug("initializing the server");
   const server = new Server(config, shortCreator);
   const app = server.start();
-
-  // todo add shutdown handler
 }
 
 main().catch((error: unknown) => {

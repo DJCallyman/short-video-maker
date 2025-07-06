@@ -5,25 +5,24 @@ import type {
 } from "express";
 import fs from "fs-extra";
 import path from "path";
-
 import { validateCreateShortInput } from "../validator";
 import { ShortCreator } from "../../short-creator/ShortCreator";
 import { logger } from "../../logger";
 import { Config } from "../../config";
+import { PlexApi } from "../../short-creator/libraries/PlexApi";
 
-// todo abstract class
 export class APIRouter {
   public router: express.Router;
   private shortCreator: ShortCreator;
   private config: Config;
+  private plexApi: PlexApi;
 
   constructor(config: Config, shortCreator: ShortCreator) {
     this.config = config;
     this.router = express.Router();
     this.shortCreator = shortCreator;
-
+    this.plexApi = new PlexApi(process.env.PLEX_URL || "", process.env.PLEX_TOKEN || "");
     this.router.use(express.json());
-
     this.setupRoutes();
   }
 
@@ -33,21 +32,16 @@ export class APIRouter {
       async (req: ExpressRequest, res: ExpressResponse) => {
         try {
           const input = validateCreateShortInput(req.body);
-
           logger.info({ input }, "Creating short video");
-
           const videoId = this.shortCreator.addToQueue(
             input.scenes,
             input.config,
           );
-
           res.status(201).json({
             videoId,
           });
         } catch (error: unknown) {
           logger.error(error, "Error validating input");
-
-          // Handle validation errors specifically
           if (error instanceof Error && error.message.startsWith("{")) {
             try {
               const errorData = JSON.parse(error.message);
@@ -61,8 +55,6 @@ export class APIRouter {
               logger.error(parseError, "Error parsing validation error");
             }
           }
-
-          // Fallback for other errors
           res.status(400).json({
             error: "Invalid input",
             message: error instanceof Error ? error.message : "Unknown error",
@@ -143,7 +135,6 @@ export class APIRouter {
           });
           return;
         }
-
         if (tmpFile.endsWith(".mp3")) {
           res.setHeader("Content-Type", "audio/mpeg");
         }
@@ -153,7 +144,6 @@ export class APIRouter {
         if (tmpFile.endsWith(".mp4")) {
           res.setHeader("Content-Type", "video/mp4");
         }
-
         const tmpFileStream = fs.createReadStream(tmpFilePath);
         tmpFileStream.on("error", (error) => {
           logger.error(error, "Error reading tmp file");
@@ -217,6 +207,44 @@ export class APIRouter {
           logger.error(error, "Error getting video");
           res.status(404).json({
             error: "Video not found",
+          });
+        }
+      },
+    );
+
+    this.router.get(
+      "/plex/movies",
+      async (req: ExpressRequest, res: ExpressResponse) => {
+        try {
+          const movies = await this.plexApi.getMovies();
+          res.status(200).json({ movies });
+        } catch (error) {
+          logger.error(error, "Error fetching movies from Plex");
+          res.status(500).json({
+            error: "Failed to fetch movies from Plex",
+          });
+        }
+      },
+    );
+
+    this.router.post(
+      "/plex/select-movie",
+      async (req: ExpressRequest, res: ExpressResponse) => {
+        const { movieId } = req.body;
+        if (!movieId) {
+          res.status(400).json({
+            error: "movieId is required",
+          });
+          return;
+        }
+        try {
+          const movieFilePath = await this.plexApi.getMovieFilePath(movieId);
+          logger.info(`Selected movie file path: ${movieFilePath}`);
+          res.status(200).json({ success: true });
+        } catch (error) {
+          logger.error(error, "Error selecting movie from Plex");
+          res.status(500).json({
+            error: "Failed to select movie from Plex",
           });
         }
       },

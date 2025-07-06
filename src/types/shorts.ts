@@ -115,6 +115,8 @@ export const renderConfig = z.object({
     .nativeEnum(MusicVolumeEnum)
     .optional()
     .describe("Volume of the music, default is high"),
+  videoSource: z.enum(["pexels", "plex"]).optional().describe("The source for the video clips"),
+  plexMovieId: z.string().optional().describe("The ID of the Plex movie to use if the source is 'plex'"),
 });
 export type RenderConfig = z.infer<typeof renderConfig>;
 

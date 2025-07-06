@@ -11,6 +11,7 @@ import { Remotion } from "./libraries/Remotion";
 import { Whisper } from "./libraries/Whisper";
 import { FFMpeg } from "./libraries/FFmpeg";
 import { PexelsAPI } from "./libraries/Pexels";
+import { PlexApi } from "./libraries/PlexApi";
 import { Config } from "../config";
 import { logger } from "../logger";
 import { MusicManager } from "./music";
@@ -23,6 +24,9 @@ import type {
   MusicTag,
   MusicForVideo,
 } from "../types/shorts";
+import { getOrientationConfig } from "../components/utils";
+
+const durationBufferSeconds = 3;
 
 export class ShortCreator {
   private queue: {
@@ -33,11 +37,12 @@ export class ShortCreator {
   constructor(
     private config: Config,
     private remotion: Remotion,
-private ttsService: TTSService,
+    private ttsService: TTSService,
     private whisper: Whisper,
     private ffmpeg: FFMpeg,
     private pexelsApi: PexelsAPI,
     private musicManager: MusicManager,
+    private plexApi: PlexApi,
   ) {}
 
   public status(id: string): VideoStatus {
@@ -52,7 +57,6 @@ private ttsService: TTSService,
   }
 
   public addToQueue(sceneInput: SceneInput[], config: RenderConfig): string {
-    // todo add mutex lock
     const id = cuid();
     this.queue.push({
       sceneInput,
@@ -66,7 +70,6 @@ private ttsService: TTSService,
   }
 
   private async processQueue(): Promise<void> {
-    // todo add a semaphore
     if (this.queue.length === 0) {
       return;
     }
@@ -100,22 +103,36 @@ private ttsService: TTSService,
     );
     const scenes: Scene[] = [];
     let totalDuration = 0;
-    const excludeVideoIds = [];
-    const tempFiles = [];
+    const excludeVideoIds: string[] = [];
+    const tempFiles: string[] = [];
 
     const orientation: OrientationEnum =
       config.orientation || OrientationEnum.portrait;
 
+    let sourceVideoPath: string | undefined;
+    if (config.videoSource === 'plex' && config.plexMovieId) {
+      try {
+        sourceVideoPath = await this.plexApi.getMovieFilePath(config.plexMovieId);
+        logger.debug({ sourceVideoPath }, "Using Plex movie as video source");
+      } catch (error) {
+        logger.error(error, "Failed to get Plex movie path, falling back to Pexels");
+      }
+    }
+
+    let movieDuration = 0;
+    if (sourceVideoPath) {
+        movieDuration = await this.ffmpeg.getVideoDuration(sourceVideoPath);
+    }
+    
     let index = 0;
     for (const scene of inputScenes) {
-const audio = await this.ttsService.generate(
+      const audio = await this.ttsService.generate(
         scene.text,
         config.voice ?? "af_heart",
       );
       let { audioLength } = audio;
       const { audio: audioStream } = audio;
 
-      // add the paddingBack in seconds to the last scene
       if (index + 1 === inputScenes.length && config.paddingBack) {
         audioLength += config.paddingBack / 1000;
       }
@@ -123,60 +140,75 @@ const audio = await this.ttsService.generate(
       const tempId = cuid();
       const tempWavFileName = `${tempId}.wav`;
       const tempMp3FileName = `${tempId}.mp3`;
-      const tempVideoFileName = `${tempId}.mp4`;
       const tempWavPath = path.join(this.config.tempDirPath, tempWavFileName);
       const tempMp3Path = path.join(this.config.tempDirPath, tempMp3FileName);
-      const tempVideoPath = path.join(
-        this.config.tempDirPath,
-        tempVideoFileName,
-      );
-      tempFiles.push(tempVideoPath);
       tempFiles.push(tempWavPath, tempMp3Path);
 
       await this.ffmpeg.saveNormalizedAudio(audioStream, tempWavPath);
       const captions = await this.whisper.CreateCaption(tempWavPath);
-
       await this.ffmpeg.saveToMp3(audioStream, tempMp3Path);
-      const video = await this.pexelsApi.findVideo(
-        scene.searchTerms,
-        audioLength,
-        excludeVideoIds,
-        orientation,
-      );
 
-      logger.debug(`Downloading video from ${video.url} to ${tempVideoPath}`);
+      let videoUrl: string;
 
-      await new Promise<void>((resolve, reject) => {
-        const fileStream = fs.createWriteStream(tempVideoPath);
-        https
-          .get(video.url, (response: http.IncomingMessage) => {
-            if (response.statusCode !== 200) {
-              reject(
-                new Error(`Failed to download video: ${response.statusCode}`),
-              );
-              return;
-            }
+      if (sourceVideoPath && movieDuration > 0) {
+        const clipDuration = audioLength + durationBufferSeconds;
+        const randomStartTime = Math.random() * (movieDuration - clipDuration);
+        
+        const tempClipFileName = `${cuid()}.mp4`;
+        const tempClipPath = path.join(this.config.tempDirPath, tempClipFileName);
+        
+        const { width, height } = getOrientationConfig(orientation);
+        const aspectRatio = width / height;
 
-            response.pipe(fileStream);
+        await this.ffmpeg.smartCrop(sourceVideoPath, tempClipPath, width, height, randomStartTime, clipDuration, aspectRatio);
+        
+        tempFiles.push(tempClipPath);
+        videoUrl = `http://localhost:${this.config.port}/api/tmp/${tempClipFileName}`;
+      } else {
+        const pexelsVideo = await this.pexelsApi.findVideo(
+          scene.searchTerms,
+          audioLength,
+          excludeVideoIds,
+          orientation,
+        );
 
-            fileStream.on("finish", () => {
-              fileStream.close();
-              logger.debug(`Video downloaded successfully to ${tempVideoPath}`);
-              resolve();
+        logger.debug(`Downloading video from ${pexelsVideo.url}`);
+        
+        const tempVideoFileName = `${cuid()}.mp4`;
+        const tempVideoPath = path.join(this.config.tempDirPath, tempVideoFileName);
+        tempFiles.push(tempVideoPath);
+
+        await new Promise<void>((resolve, reject) => {
+          const fileStream = fs.createWriteStream(tempVideoPath);
+          https
+            .get(pexelsVideo.url, (response: http.IncomingMessage) => {
+              if (response.statusCode !== 200) {
+                reject(
+                  new Error(`Failed to download video: ${response.statusCode}`),
+                );
+                return;
+              }
+              response.pipe(fileStream);
+              fileStream.on("finish", () => {
+                fileStream.close();
+                logger.debug(`Video downloaded successfully to ${tempVideoPath}`);
+                resolve();
+              });
+            })
+            .on("error", (err: Error) => {
+              fs.unlink(tempVideoPath, () => {});
+              logger.error(err, "Error downloading video:");
+              reject(err);
             });
-          })
-          .on("error", (err: Error) => {
-            fs.unlink(tempVideoPath, () => {}); // Delete the file if download failed
-            logger.error(err, "Error downloading video:");
-            reject(err);
-          });
-      });
-
-      excludeVideoIds.push(video.id);
+        });
+        
+        excludeVideoIds.push(pexelsVideo.id);
+        videoUrl = `http://localhost:${this.config.port}/api/tmp/${tempVideoFileName}`;
+      }
 
       scenes.push({
         captions,
-        video: `http://localhost:${this.config.port}/api/tmp/${tempVideoFileName}`,
+        video: videoUrl,
         audio: {
           url: `http://localhost:${this.config.port}/api/tmp/${tempMp3FileName}`,
           duration: audioLength,
@@ -186,6 +218,7 @@ const audio = await this.ttsService.generate(
       totalDuration += audioLength;
       index++;
     }
+
     if (config.paddingBack) {
       totalDuration += config.paddingBack / 1000;
     }
@@ -256,42 +289,31 @@ const audio = await this.ttsService.generate(
 
   public listAllVideos(): { id: string; status: VideoStatus }[] {
     const videos: { id: string; status: VideoStatus }[] = [];
-
-    // Check if videos directory exists
     if (!fs.existsSync(this.config.videosDirPath)) {
       return videos;
     }
-
-    // Read all files in the videos directory
     const files = fs.readdirSync(this.config.videosDirPath);
-
-    // Filter for MP4 files and extract video IDs
     for (const file of files) {
       if (file.endsWith(".mp4")) {
         const videoId = file.replace(".mp4", "");
-
         let status: VideoStatus = "ready";
         const inQueue = this.queue.find((item) => item.id === videoId);
         if (inQueue) {
           status = "processing";
         }
-
         videos.push({ id: videoId, status });
       }
     }
-
-    // Add videos that are in the queue but not yet rendered
     for (const queueItem of this.queue) {
       const existingVideo = videos.find((v) => v.id === queueItem.id);
       if (!existingVideo) {
         videos.push({ id: queueItem.id, status: "processing" });
       }
     }
-
     return videos;
   }
 
   public ListAvailableVoices(): string[] {
-return this.ttsService.listAvailableVoices();
+    return this.ttsService.listAvailableVoices();
   }
 }
