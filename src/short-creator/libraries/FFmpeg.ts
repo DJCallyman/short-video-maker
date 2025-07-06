@@ -107,11 +107,11 @@ export class FFMpeg {
     });
   }
   
-  async smartCrop(inputPath: string, outputPath: string, width: number, height: number, startTime: number, duration: number): Promise<string> {
+  async smartCrop(inputPath: string, outputPath: string, width: number, height: number, startTime: number, duration: number, aspectRatio?: number): Promise<string> {
     logger.debug({ inputPath }, "Starting smart crop");
-  
+
     const framePath = path.join(path.dirname(outputPath), `temp-frame-${Date.now()}.png`);
-  
+
     await new Promise<void>((resolve, reject) => {
       ffmpeg(inputPath)
         .setStartTime(startTime)
@@ -124,10 +124,23 @@ export class FFMpeg {
         .on('end', () => resolve())
         .on('error', reject);
     });
-  
+
     const result = await smartcrop.crop(framePath, { width, height });
-    const crop = result.topCrop;
-  
+    let crop = result.topCrop;
+
+    if (aspectRatio) {
+        const currentRatio = crop.width / crop.height;
+        if (currentRatio > aspectRatio) {
+            const newWidth = Math.floor(crop.height * aspectRatio);
+            crop.x += Math.floor((crop.width - newWidth) / 2);
+            crop.width = newWidth;
+        } else {
+            const newHeight = Math.floor(crop.width / aspectRatio);
+            crop.y += Math.floor((crop.height - newHeight) / 2);
+            crop.height = newHeight;
+        }
+    }
+    
     logger.debug({ crop }, "Optimal crop determined by smartcrop.js");
     
     // Sanitize the crop values to be integers and divisible by 2

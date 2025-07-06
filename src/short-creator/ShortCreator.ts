@@ -24,6 +24,7 @@ import type {
   MusicTag,
   MusicForVideo,
 } from "../types/shorts";
+import { getOrientationConfig } from "../components/utils";
 
 const durationBufferSeconds = 3;
 
@@ -156,11 +157,10 @@ export class ShortCreator {
         const tempClipFileName = `${cuid()}.mp4`;
         const tempClipPath = path.join(this.config.tempDirPath, tempClipFileName);
         
-        // Log the command before executing it
-        const ffmpegCommand = `ffmpeg -i "${sourceVideoPath}" -ss ${randomStartTime} -t ${clipDuration} -vf "crop=1080:1920" -c:v libx264 -preset fast -pix_fmt yuv420p "${tempClipPath}"`;
-        fs.writeFileSync('ffmpeg-command.log', ffmpegCommand);
+        const { width, height } = getOrientationConfig(orientation);
+        const aspectRatio = width / height;
 
-        await this.ffmpeg.smartCrop(sourceVideoPath, tempClipPath, 1080, 1920, randomStartTime, clipDuration);
+        await this.ffmpeg.smartCrop(sourceVideoPath, tempClipPath, width, height, randomStartTime, clipDuration, aspectRatio);
         
         tempFiles.push(tempClipPath);
         videoUrl = `http://localhost:${this.config.port}/api/tmp/${tempClipFileName}`;
