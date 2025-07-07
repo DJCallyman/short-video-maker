@@ -1,3 +1,5 @@
+// src/short-creator/ShortCreator.test.ts
+
 process.env.LOG_LEVEL = "debug";
 
 import { test, expect, vi } from "vitest";
@@ -11,6 +13,7 @@ import { FFMpeg } from "./libraries/FFmpeg";
 import { PexelsAPI } from "./libraries/Pexels";
 import { Config } from "../config";
 import { MusicManager } from "./music";
+import { PlexApi } from "./libraries/PlexApi";
 
 // mock fs-extra
 vi.mock("fs-extra", async () => {
@@ -143,8 +146,9 @@ vi.mock("@remotion/install-whisper-cpp", () => {
 });
 
 test("test me", async () => {
+  const config = new Config();
   const kokoro = await Kokoro.init("fp16");
-  const ffmpeg = await FFMpeg.init();
+  const ffmpeg = await FFMpeg.init(config);
 
   vi.spyOn(ffmpeg, "saveNormalizedAudio").mockResolvedValue("mocked-path.wav");
   vi.spyOn(ffmpeg, "saveToMp3").mockResolvedValue("mocked-path.mp3");
@@ -157,8 +161,8 @@ test("test me", async () => {
     height: 1920,
   });
 
-  const config = new Config();
   const remotion = await Remotion.init(config);
+  const plexApi = new PlexApi(process.env.PLEX_URL || '', process.env.PLEX_TOKEN || '');
 
   // control the render promise resolution
   let resolveRenderPromise: () => void;
@@ -187,6 +191,7 @@ test("test me", async () => {
     ffmpeg,
     pexelsAPI,
     musicManager,
+    plexApi
   );
 
   const videoId = shortCreator.addToQueue(

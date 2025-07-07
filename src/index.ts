@@ -51,7 +51,7 @@ async function main() {
   logger.debug("initializing whisper");
   const whisper = await Whisper.init(config);
   logger.debug("initializing ffmpeg");
-  const ffmpeg = await FFMpeg.init();
+  const ffmpeg = await FFMpeg.init(config);
   const pexelsApi = new PexelsAPI(config.pexelsApiKey);
   const plexApi = new PlexApi(process.env.PLEX_URL || '', process.env.PLEX_TOKEN || '');
 

@@ -1,3 +1,5 @@
+// src/short-creator/libraries/FFmpeg.ts
+
 import ffmpeg from "fluent-ffmpeg";
 import { Readable } from "node:stream";
 import { logger } from "../../logger";
@@ -5,13 +7,17 @@ import { exec } from 'child_process';
 import fs from 'fs-extra';
 import path from 'path';
 import smartcrop from 'smartcrop-sharp';
+import cuid from 'cuid';
+import { Config } from "../../config";
 
 export class FFMpeg {
-  static async init(): Promise<FFMpeg> {
+  constructor(private config: Config) {}
+
+  static async init(config: Config): Promise<FFMpeg> {
     return import("@ffmpeg-installer/ffmpeg").then((ffmpegInstaller) => {
       ffmpeg.setFfmpegPath(ffmpegInstaller.path);
       logger.info("FFmpeg path set to:", ffmpegInstaller.path);
-      return new FFMpeg();
+      return new FFMpeg(config);
     });
   }
 
@@ -106,11 +112,49 @@ export class FFMpeg {
       });
     });
   }
-  
+
+  async dynamicCrop(inputPath: string, outputPath: string, width: number, height: number, startTime: number, duration: number, aspectRatio?: number): Promise<string> {
+    const subClipDuration = duration / 5;
+    const tempDir = path.join(this.config.tempDirPath, cuid());
+    fs.ensureDirSync(tempDir);
+    const croppedSubClipPaths = [];
+
+    for (let i = 0; i < 5; i++) {
+        const subClipStartTime = startTime + i * subClipDuration;
+        const subClipPath = path.join(tempDir, `subclip-${i}.mp4`);
+        await this.extractClip(inputPath, subClipPath, subClipStartTime, subClipDuration);
+        
+        const croppedSubClipPath = path.join(tempDir, `cropped-subclip-${i}.mp4`);
+        await this.smartCrop(subClipPath, croppedSubClipPath, width, height, 0, subClipDuration, aspectRatio);
+        croppedSubClipPaths.push(croppedSubClipPath);
+    }
+
+    const concatFilePath = path.join(tempDir, 'concat.txt');
+    const fileContent = croppedSubClipPaths.map(p => `file '${p}'`).join('\n');
+    fs.writeFileSync(concatFilePath, fileContent);
+
+    return new Promise<string>((resolve, reject) => {
+        ffmpeg()
+            .input(concatFilePath)
+            .inputOptions(['-f', 'concat', '-safe', '0'])
+            .outputOptions('-c', 'copy')
+            .output(outputPath)
+            .on('end', () => {
+                fs.removeSync(tempDir);
+                resolve(outputPath);
+            })
+            .on('error', (err) => {
+                fs.removeSync(tempDir);
+                reject(err);
+            })
+            .run();
+    });
+  }
+
   async smartCrop(inputPath: string, outputPath: string, width: number, height: number, startTime: number, duration: number, aspectRatio?: number): Promise<string> {
     logger.debug({ inputPath }, "Starting smart crop");
 
-    const framePath = path.join(path.dirname(outputPath), `temp-frame-${Date.now()}.png`);
+    const framePath = path.join(this.config.tempDirPath, `temp-frame-${cuid()}.png`);
 
     await new Promise<void>((resolve, reject) => {
       ffmpeg(inputPath)

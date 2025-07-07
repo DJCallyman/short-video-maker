@@ -1,3 +1,5 @@
+// src/short-creator/ShortCreator.ts
+
 import { OrientationEnum } from "./../types/shorts";
 /* eslint-disable @remotion/deterministic-randomness */
 import fs from "fs-extra";
@@ -160,7 +162,7 @@ export class ShortCreator {
         const { width, height } = getOrientationConfig(orientation);
         const aspectRatio = width / height;
 
-        await this.ffmpeg.smartCrop(sourceVideoPath, tempClipPath, width, height, randomStartTime, clipDuration, aspectRatio);
+        await this.ffmpeg.dynamicCrop(sourceVideoPath, tempClipPath, width, height, randomStartTime, clipDuration, aspectRatio);
         
         tempFiles.push(tempClipPath);
         videoUrl = `http://localhost:${this.config.port}/api/tmp/${tempClipFileName}`;
