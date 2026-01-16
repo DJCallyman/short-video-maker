@@ -68,26 +68,33 @@ You can find example n8n workflows created with the REST/MCP server [in this rep
 # Features
 
 - Generate complete short videos from text prompts
-- Text-to-speech conversion
-- Automatic caption generation and styling
-- Background video search and selection via Pexels
+- **AI-powered automation**: Auto-generate scripts and search terms using Venice AI's LLMs
+- Text-to-speech conversion with multiple providers (Kokoro, Venice AI) and speed control (0.25x - 4.0x)
+- Automatic caption generation and styling with animations
+- Background video search and selection via Pexels, or AI-generated videos via Venice AI
+- **Advanced visual effects**: Transitions (fade, slide), caption animations (fadeIn, slideUp, scale), Ken Burns effect
+- **Configurable video styling**: Custom caption fonts, sizes, animations, and effects
 - Background music with genre/mood selection
+- **Real-time progress tracking** via Server-Sent Events (SSE)
+- **Settings management API** for persistent configuration
 - Serve as both REST API and Model Context Protocol (MCP) server
 
 # How It Works
 
 Shorts Creator takes simple text inputs and search terms, then:
 
-1. Converts text to speech using Kokoro TTS
-2. Generates accurate captions via Whisper
-3. Finds relevant background videos from Pexels
-4. Composes all elements with Remotion
-5. Renders a professional-looking short video with perfectly timed captions
+1. **(Optional)** Generates scripts and search terms using Venice AI's LLMs
+2. Converts text to speech using Kokoro TTS or Venice AI TTS (with adjustable speed)
+3. Generates accurate captions via Whisper or Venice AI transcription
+4. Finds relevant background videos from Pexels or generates via Venice AI
+5. Applies advanced visual effects: transitions, caption animations, Ken Burns effect
+6. Composes all elements with Remotion
+7. Renders a professional-looking short video with perfectly timed, animated captions
 
 # Limitations
 
-- The project only capable generating videos with English voiceover (kokoro-js doesn’t support other languages at the moment)
-- The background videos are sourced from Pexels
+- The project is primarily optimized for English voiceover (Kokoro TTS doesn't support other languages at the moment)
+- Background videos are sourced from Pexels or Venice AI (unless using custom video source)
 
 # General Requirements
 
@@ -212,12 +219,16 @@ You can load it on http://localhost:3123
 
 ## 🟢 Configuration
 
-| key             | description                                                     | default |
-| --------------- | --------------------------------------------------------------- | ------- |
-| PEXELS_API_KEY  | [your (free) Pexels API key](https://www.pexels.com/api/)       |         |
-| LOG_LEVEL       | pino log level                                                  | info    |
-| WHISPER_VERBOSE | whether the output of whisper.cpp should be forwarded to stdout | false   |
-| PORT            | the port the server will listen on                              | 3123    |
+| key                     | description                                                                          | default |
+| ----------------------- | ------------------------------------------------------------------------------------ | ------- |
+| PEXELS_API_KEY          | [your (free) Pexels API key](https://www.pexels.com/api/)                            |         |
+| VENICE_API_KEY          | Your Venice AI API key (optional, enables Venice AI features for TTS, video, etc)    |         |
+| LOG_LEVEL               | pino log level                                                                       | info    |
+| WHISPER_VERBOSE         | whether the output of whisper.cpp should be forwarded to stdout                     | false   |
+| PORT                    | the port the server will listen on                                                  | 3123    |
+| TTS_PROVIDER            | Text-to-speech provider: `kokoro` or `venice`                                       | kokoro  |
+| TRANSCRIPTION_PROVIDER  | Transcription provider: `whisper` (local) or `venice` (API)                         | whisper |
+| VENICE_CHAT_MODEL       | Venice AI model for script generation and AI features (e.g., `llama-3.3-70b`)        | llama-3.3-70b |
 
 ## ⚙️ System configuration
 
@@ -238,15 +249,24 @@ You can load it on http://localhost:3123
 
 # Configuration options
 
-| key                    | description                                                                                                    | default    |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------- | ---------- |
-| paddingBack            | The end screen, for how long the video should keep playing after the narration has finished (in milliseconds). | 0          |
-| music                  | The mood of the background music. Get the available options from the GET `/api/music-tags` endpoint.           | random     |
-| captionPosition        | The position where the captions should be rendered. Possible options: `top`, `center`, `bottom`. Default value | `bottom`   |
-| captionBackgroundColor | The background color of the active caption item.                                                               | `blue`     |
-| voice                  | The Kokoro voice.                                                                                              | `af_heart` |
-| orientation            | The video orientation. Possible options are `portrait` and `landscape`                                         | `portrait` |
-| musicVolume            | Set the volume of the background music. Possible options are `low` `medium` `high` and `muted`                 | `high`     |
+| key                    | description                                                                                                    | default           |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------|
+| paddingBack            | The end screen, for how long the video should keep playing after the narration has finished (in milliseconds). | 0                 |
+| music                  | The mood of the background music. Get the available options from the GET `/api/music-tags` endpoint.           | random            |
+| captionPosition        | The position where the captions should be rendered. Possible options: `top`, `center`, `bottom`. Default value | `bottom`          |
+| captionBackgroundColor | The background color of the active caption item.                                                               | `blue`            |
+| captionFontSize        | Font size for captions (CSS value). Examples: `6em`, `8em`, `48px`                                            | `6em` (portrait), `8em` (landscape) |
+| captionFontFamily      | Font family for captions                                                                                       | `Barlow Condensed`|
+| captionAnimation       | Animation effect for captions: `none`, `fadeIn`, `slideUp`, or `scale`                                        | `none`            |
+| voice                  | The Kokoro voice (see `/api/voices` for all options).                                                          | `af_heart`        |
+| orientation            | The video orientation. Possible options are `portrait` and `landscape`                                         | `portrait`        |
+| musicVolume            | Set the volume of the background music. Possible options are `low` `medium` `high` and `muted`                 | `high`            |
+| ttsSpeed               | Text-to-speech speed multiplier (0.25 to 4.0)                                                                 | 1.0               |
+| videoSource            | Source for background videos: `pexels`, `plex`, or `venice-ai`                                                | `pexels`          |
+| veniceVideoModel       | Venice AI model for video generation (when videoSource is `venice-ai`)                                         |                   |
+| transition             | Transition effect between scenes: `none`, `fade`, or `slide`                                                  | `none`            |
+| transitionDuration     | Duration of transitions in milliseconds                                                                        | 500               |
+| kenBurnsEffect         | Enable Ken Burns (zoom/pan) effect on videos                                                                  | false             |
 
 # Usage
 
@@ -415,6 +435,163 @@ curl --location 'localhost:3123/api/music-tags'
 ]
 ```
 
+### GET `/api/short-video/{videoId}/progress`
+
+Real-time progress tracking via Server-Sent Events (SSE). Returns updates as the video is being generated.
+
+```bash
+curl --location 'localhost:3123/api/short-video/cma9sjly700020jo25vwzfnv9/progress'
+```
+
+Progress stages:
+- `queued` - Video added to queue
+- `generating_audio` - TTS in progress
+- `transcribing` - Audio transcription
+- `fetching_videos` - Downloading/generating video clips
+- `composing` - Adding music and effects
+- `rendering` - Final video render
+- `complete` - Success
+- `error` - Failure
+
+### POST `/api/ai/generate-script`
+
+Generate a video script using Venice AI based on a topic.
+
+```bash
+curl --location 'localhost:3123/api/ai/generate-script' \
+--header 'Content-Type: application/json' \
+--data '{
+    "topic": "Benefits of renewable energy",
+    "duration": 30
+}'
+```
+
+```bash
+{
+    "script": [
+        {
+            "text": "Scene description or narration...",
+            "searchTerms": ["keyword1", "keyword2"]
+        }
+    ]
+}
+```
+
+### POST `/api/ai/generate-search-terms`
+
+Generate search terms for stock footage from text using Venice AI.
+
+```bash
+curl --location 'localhost:3123/api/ai/generate-search-terms' \
+--header 'Content-Type: application/json' \
+--data '{
+    "text": "The sun is setting over the mountains"
+}'
+```
+
+```bash
+{
+    "searchTerms": ["sunset", "mountains", "landscape", "nature"]
+}
+```
+
+### POST `/api/voices/preview`
+
+Generate a voice preview for testing. Returns audio in WAV format.
+
+```bash
+curl --location 'localhost:3123/api/voices/preview' \
+--header 'Content-Type: application/json' \
+--data '{
+    "voice": "af_bella",
+    "text": "This is a voice preview",
+    "speed": 1.0
+}'
+```
+
+Response: WAV audio file (audio/wav)
+
+### GET `/api/settings`
+
+Get current application settings (API keys are masked for security).
+
+```bash
+curl --location 'localhost:3123/api/settings'
+```
+
+```bash
+{
+    "ttsProvider": "kokoro",
+    "transcriptionProvider": "whisper",
+    "veniceApiKey": "sk_***...***",
+    "veniceChatModel": "llama-3.3-70b"
+}
+```
+
+### PUT `/api/settings`
+
+Update application settings. Settings are persisted to disk.
+
+```bash
+curl --location --request PUT 'localhost:3123/api/settings' \
+--header 'Content-Type: application/json' \
+--data '{
+    "ttsProvider": "venice",
+    "veniceApiKey": "your-api-key",
+    "veniceChatModel": "llama-3.3-70b"
+}'
+```
+
+```bash
+{
+    "success": true
+}
+```
+
+### POST `/api/settings/reset`
+
+Reset all settings to defaults.
+
+```bash
+curl --location --request POST 'localhost:3123/api/settings/reset'
+```
+
+```bash
+{
+    "success": true
+}
+```
+
+## Additional Example: Using New Features
+
+Here's an example request that uses some of the new features:
+
+```bash
+curl --location 'localhost:3123/api/short-video' \
+--header 'Content-Type: application/json' \
+--data '{
+    "scenes": [
+      {
+        "text": "This is an amazing video with advanced effects!",
+        "searchTerms": ["technology", "innovation"]
+      }
+    ],
+    "config": {
+      "paddingBack": 1500,
+      "music": "chill",
+      "orientation": "portrait",
+      "transition": "fade",
+      "transitionDuration": 500,
+      "captionAnimation": "slideUp",
+      "captionFontSize": "7em",
+      "captionFontFamily": "Barlow Condensed",
+      "kenBurnsEffect": true,
+      "ttsSpeed": 1.2,
+      "videoSource": "pexels"
+    }
+}'
+```
+
 # Troubleshooting
 
 ## Docker
@@ -464,17 +641,41 @@ Docker is the recommended way to run the project.
 
 Honestly, not a lot - only whisper.cpp can be accelerated.
 
-Remotion is CPU-heavy, and [Kokoro-js](https://github.com/hexgrad/kokoro) runs on the CPU.
+Remotion is CPU-heavy, and [Kokoro-js](https://github.com/hexgrad/kokoro) runs on the CPU. If you use Venice AI features, they run on their API servers.
 
-## Is there a UI that I can use to generate the videos
+## Is there a UI that I can use to generate the videos?
 
-No (t yet)
+Yes! The Web UI is available at `http://localhost:3123` when the server is running. It includes:
+- Video creator with advanced configuration
+- AI Tools page for script generation and voice previews
+- Settings management for API keys and providers
 
-## Can I select different source for the videos than Pexels, or provide my own video
+## Can I select different sources for the videos than Pexels?
 
-No
+Yes! You can now use:
+- **Pexels** (default) - Free stock videos
+- **Venice AI** - AI-generated videos based on text prompts
+- **Plex** - Custom videos from a Plex server (if configured)
 
-## Can the project generate videos from images?
+## Can the project generate videos from text prompts using AI?
+
+Yes! When you set `videoSource: "venice-ai"` in your config, you can use Venice AI's video generation models like `mochi-1-text-to-video` or `wan-2.5-preview-image-to-video`.
+
+## Can the project auto-generate scripts from a topic?
+
+Yes! Use the `/api/ai/generate-script` endpoint or the AI Tools page in the Web UI to automatically generate video scripts and search terms based on a topic.
+
+## Can I adjust the speed of the TTS voice?
+
+Yes! Use the `ttsSpeed` configuration option (0.25 to 4.0). For example, `ttsSpeed: 1.5` will speed up the voice by 50%.
+
+## What visual effects are available?
+
+The project now supports:
+- **Transitions**: Fade, slide, or no transition between scenes
+- **Caption Animations**: Fade-in, slide-up, or spring-scale animations
+- **Ken Burns Effect**: Cinematic zoom and pan effect on background videos
+- All effects are customizable via configuration
 
 No
 
@@ -487,6 +688,7 @@ No
 | [FFmpeg](https://ffmpeg.org/)                          | ^2.1.3   | LGPL/GPL                                                                          | Audio/video manipulation        |
 | [Kokoro.js](https://www.npmjs.com/package/kokoro-js)   | ^1.2.0   | MIT                                                                               | Text-to-speech generation       |
 | [Pexels API](https://www.pexels.com/api/)              | N/A      | [Pexels Terms](https://www.pexels.com/license/)                                   | Background videos               |
+| [Venice AI API](https://venice.ai/)                    | N/A      | [Venice Terms](https://venice.ai/)                                                | TTS, transcription, LLM, video generation (optional) |
 
 ## How to contribute?
 
@@ -504,3 +706,4 @@ This project is licensed under the [MIT License](LICENSE).
 - ❤️ [Pexels](https://www.pexels.com/) for video content
 - ❤️ [FFmpeg](https://ffmpeg.org/) for audio/video processing
 - ❤️ [Kokoro](https://github.com/hexgrad/kokoro) for TTS
+- ❤️ [Venice AI](https://venice.ai/) for LLMs, TTS, transcription, and video generation APIs
