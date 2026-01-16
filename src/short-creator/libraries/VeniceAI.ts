@@ -81,6 +81,16 @@ export class VeniceAI implements TTSService {
     logger.debug({ text, voice, speed }, "Generating audio with Venice AI");
 
     try {
+      // Log API key status for debugging (masked)
+      logger.debug(
+        {
+          apiKeyPresent: !!this.apiKey,
+          apiKeyLength: this.apiKey?.length || 0,
+          apiKeyPrefix: this.apiKey?.substring(0, 5),
+        },
+        "Venice AI API key status"
+      );
+
       const response = await axios.post(
         `${this.baseUrl}/audio/speech`,
         {
@@ -99,6 +109,8 @@ export class VeniceAI implements TTSService {
         }
       );
 
+      logger.debug({ status: response.status }, "Venice AI request successful");
+
       const audio = response.data;
 
       // Parse WAV header to get actual duration
@@ -110,8 +122,17 @@ export class VeniceAI implements TTSService {
         audio,
         audioLength,
       };
-    } catch (error) {
-      logger.error(error, "Error generating audio from Venice AI");
+    } catch (error: any) {
+      logger.error(
+        {
+          error,
+          status: error?.response?.status,
+          statusText: error?.response?.statusText,
+          apiKeyPresent: !!this.apiKey,
+          apiKeyLength: this.apiKey?.length || 0,
+        },
+        "Error generating audio from Venice AI"
+      );
       throw new Error("Failed to generate audio from Venice AI.");
     }
   }

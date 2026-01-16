@@ -6,7 +6,7 @@ export type VeniceVideoModel = string;
 
 export type VeniceVideoResolution = '480p' | '720p' | '1080p';
 export type VeniceVideoAspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '21:9';
-export type VeniceVideoDuration = '4s' | '5s' | '8s' | '10s' | '12s' | '15s';
+export type VeniceVideoDuration = '4s' | '5s' | '8s' | '10s' | '12s' | '15s' | '18s';
 
 export interface VeniceVideoQueueRequest {
   model: VeniceVideoModel;
@@ -240,7 +240,7 @@ export class VeniceVideo {
       model,
       prompt,
       negative_prompt: options.negativePrompt,
-      duration: options.duration || '4s', // Changed to 4s for broader model compatibility (Sora doesn't support 5s)
+      duration: options.duration || '5s', // Venice API only supports: 5s, 8s, 10s, 15s, 18s
       resolution: options.resolution || '720p',
       aspect_ratio: options.aspectRatio || '16:9',
       // Only include audio field if explicitly set to true (Sora models don't support audio configuration)
