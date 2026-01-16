@@ -26,8 +26,13 @@ interface VeniceSegment {
 }
 
 interface VeniceTranscriptionResponse {
-  words?: VeniceWord[];
-  segments?: VeniceSegment[];
+  text: string;
+  duration?: number;
+  timestamps?: {
+    word?: VeniceWord[];
+    segment?: VeniceSegment[];
+    char?: Array<{ char: string; start: number; end: number; }>;
+  };
 }
 
 export class Whisper {
@@ -89,9 +94,9 @@ export class Whisper {
         filename: path.basename(audioPath),
         contentType: 'audio/wav',
       });
-      formData.append('model', 'whisper-large-v3-turbo');
-      formData.append('response_format', 'verbose_json');
-      formData.append('timestamp_granularities[]', 'word');
+      formData.append('model', 'nvidia/parakeet-tdt-0.6b-v3');
+      formData.append('response_format', 'json');
+      formData.append('timestamps', 'true');
 
       const response = await axios.post(
         'https://api.venice.ai/api/v1/audio/transcriptions',
@@ -104,23 +109,24 @@ export class Whisper {
         }
       );
 
-      logger.debug({ audioPath }, "Venice transcription completed");
+      logger.debug({ audioPath, response: response.data }, "Venice transcription completed");
 
       // Convert Venice response to Caption format
       const captions: Caption[] = [];
       const data = response.data as VeniceTranscriptionResponse;
 
-      if (data.words) {
-        data.words.forEach((word: VeniceWord) => {
+      if (data.timestamps?.word) {
+        logger.debug({ wordCount: data.timestamps.word.length, firstWord: data.timestamps.word[0] }, "Processing word timestamps from Venice");
+        data.timestamps.word.forEach((word: VeniceWord) => {
           captions.push({
             text: word.word,
             startMs: Math.round(word.start * 1000),
             endMs: Math.round(word.end * 1000),
           });
         });
-      } else if (data.segments) {
+      } else if (data.timestamps?.segment) {
         // Fallback to segments if words not available
-        data.segments.forEach((segment: VeniceSegment) => {
+        data.timestamps.segment.forEach((segment: VeniceSegment) => {
           const words = segment.text.trim().split(' ');
           const duration = segment.end - segment.start;
           const wordDuration = duration / words.length;
@@ -135,6 +141,13 @@ export class Whisper {
               endMs,
             });
           });
+        });
+      } else {
+        // If no timestamps, create a single caption for the entire text
+        captions.push({
+          text: data.text,
+          startMs: 0,
+          endMs: Math.round((data.duration || 0) * 1000),
         });
       }
 
