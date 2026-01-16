@@ -4,8 +4,8 @@ export interface TTSResult {
     audio: ArrayBuffer;
     audioLength: number;
   }
-  
+
   export interface TTSService {
-    generate(text: string, voice: string): Promise<TTSResult>;
+    generate(text: string, voice: string, speed?: number): Promise<TTSResult>;
     listAvailableVoices(): string[];
   }

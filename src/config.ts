@@ -3,7 +3,7 @@ import "dotenv/config";
 import os from "os";
 import fs from "fs-extra";
 import pino from "pino";
-import { kokoroModelPrecision, whisperModels } from "./types/shorts";
+import type { kokoroModelPrecision, whisperModels } from "./types/shorts";
 
 const defaultLogLevel: pino.Level = "info";
 const defaultPort = 3123;
@@ -27,7 +27,7 @@ export const logger = pino({
 });
 
 export class Config {
-  private dataDirPath: string;
+  public readonly dataDirPath: string;
   private libsDirPath: string;
   private staticDirPath: string;
 
@@ -46,7 +46,9 @@ export class Config {
   public whisperVersion: string = whisperVersion;
   public whisperModel: whisperModels = defaultWhisperModel;
   public ttsProvider: "kokoro" | "venice";
+  public transcriptionProvider: "whisper" | "venice";
   public veniceApiKey?: string;
+  public veniceChatModel: string = "llama-3.3-70b";
   public kokoroModelPrecision: kokoroModelPrecision = "fp32";
 
   // docker-specific, performance-related settings to prevent memory issues
@@ -92,7 +94,9 @@ if (process.env.KOKORO_MODEL_PRECISION) {
     }
 
     this.ttsProvider = (process.env.TTS_PROVIDER as "kokoro" | "venice") || "kokoro";
+    this.transcriptionProvider = (process.env.TRANSCRIPTION_PROVIDER as "whisper" | "venice") || "whisper";
     this.veniceApiKey = process.env.VENICE_API_KEY;
+    this.veniceChatModel = process.env.VENICE_CHAT_MODEL || "llama-3.3-70b";
 
     console.log(`[DEBUG] TTS_PROVIDER from env: ${process.env.TTS_PROVIDER}`);
     console.log(`[DEBUG] Configured ttsProvider: ${this.ttsProvider}`);
@@ -109,9 +113,15 @@ if (process.env.KOKORO_MODEL_PRECISION) {
   }
 
   public ensureConfig() {
-if (this.ttsProvider === 'venice' && !this.veniceApiKey) {
+    if (this.ttsProvider === 'venice' && !this.veniceApiKey) {
       throw new Error(
         "TTS_PROVIDER is set to 'venice', but VENICE_API_KEY environment variable is missing.",
+      );
+    }
+
+    if (this.transcriptionProvider === 'venice' && !this.veniceApiKey) {
+      throw new Error(
+        "TRANSCRIPTION_PROVIDER is set to 'venice', but VENICE_API_KEY environment variable is missing.",
       );
     }
 

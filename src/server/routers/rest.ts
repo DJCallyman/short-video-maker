@@ -5,23 +5,44 @@ import type {
 } from "express";
 import fs from "fs-extra";
 import path from "path";
+import axios from "axios";
 import { validateCreateShortInput } from "../validator";
-import { ShortCreator } from "../../short-creator/ShortCreator";
+import type { ShortCreator } from "../../short-creator/ShortCreator";
 import { logger } from "../../logger";
-import { Config } from "../../config";
+import type { Config } from "../../config";
 import { PlexApi } from "../../short-creator/libraries/PlexApi";
+import type { ProgressTracker } from "../ProgressTracker";
+import type { SettingsManager } from "../SettingsManager";
+import type { TTSService } from "../../short-creator/libraries/TTSService";
+import { VeniceAI } from "../../short-creator/libraries/VeniceAI";
 
 export class APIRouter {
   public router: express.Router;
   private shortCreator: ShortCreator;
   private config: Config;
   private plexApi: PlexApi;
+  private progressTracker: ProgressTracker;
+  private settingsManager: SettingsManager;
+  private ttsService: TTSService;
 
-  constructor(config: Config, shortCreator: ShortCreator) {
+  /**
+   * Format model ID to human-readable name
+   * Examples: "llama-3.3-70b" -> "Llama 3.3 70B", "gpt-4o" -> "GPT-4o"
+   */
+  constructor(
+    config: Config,
+    shortCreator: ShortCreator,
+    progressTracker: ProgressTracker,
+    settingsManager: SettingsManager,
+    ttsService: TTSService
+  ) {
     this.config = config;
     this.router = express.Router();
     this.shortCreator = shortCreator;
     this.plexApi = new PlexApi(process.env.PLEX_URL || "", process.env.PLEX_TOKEN || "");
+    this.progressTracker = progressTracker;
+    this.settingsManager = settingsManager;
+    this.ttsService = ttsService;
     this.router.use(express.json());
     this.setupRoutes();
   }
@@ -81,19 +102,73 @@ export class APIRouter {
     );
 
     this.router.get(
+      "/short-video/:videoId/progress",
+      async (req: ExpressRequest, res: ExpressResponse) => {
+        const { videoId } = req.params;
+        if (!videoId) {
+          res.status(400).json({
+            error: "videoId is required",
+          });
+          return;
+        }
+
+        // Add SSE connection for progress updates
+        this.progressTracker.addConnection(videoId, res);
+      },
+    );
+
+    this.router.get(
       "/music-tags",
-      (req: ExpressRequest, res: ExpressResponse) => {
+      (_req: ExpressRequest, res: ExpressResponse) => {
         res.status(200).json(this.shortCreator.ListAvailableMusicTags());
       },
     );
 
-    this.router.get("/voices", (req: ExpressRequest, res: ExpressResponse) => {
+    this.router.get("/voices", (_req: ExpressRequest, res: ExpressResponse) => {
       res.status(200).json(this.shortCreator.ListAvailableVoices());
     });
 
+    this.router.post(
+      "/voices/preview",
+      async (req: ExpressRequest, res: ExpressResponse) => {
+        try {
+          const { voice, text } = req.body;
+
+          if (!voice) {
+            res.status(400).json({
+              error: "voice is required",
+            });
+            return;
+          }
+
+          const sampleText = text || "Hello! This is a sample of this voice.";
+
+          logger.info({ voice, text: sampleText }, "Generating voice preview");
+
+          const audio = await this.shortCreator.generateVoicePreview(
+            sampleText,
+            voice
+          );
+
+          res.setHeader("Content-Type", "audio/wav");
+          res.setHeader(
+            "Content-Disposition",
+            `inline; filename=preview-${voice}.wav`,
+          );
+          res.send(Buffer.from(audio));
+        } catch (error: unknown) {
+          logger.error(error, "Error generating voice preview");
+          res.status(500).json({
+            error: "Failed to generate voice preview",
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      },
+    );
+
     this.router.get(
       "/short-videos",
-      (req: ExpressRequest, res: ExpressResponse) => {
+      (_req: ExpressRequest, res: ExpressResponse) => {
         const videos = this.shortCreator.listAllVideos();
         res.status(200).json({
           videos,
@@ -214,7 +289,7 @@ export class APIRouter {
 
     this.router.get(
       "/plex/movies",
-      async (req: ExpressRequest, res: ExpressResponse) => {
+      async (_req: ExpressRequest, res: ExpressResponse) => {
         try {
           const movies = await this.plexApi.getMovies();
           res.status(200).json({ movies });
@@ -245,6 +320,199 @@ export class APIRouter {
           logger.error(error, "Error selecting movie from Plex");
           res.status(500).json({
             error: "Failed to select movie from Plex",
+          });
+        }
+      },
+    );
+
+    this.router.get(
+      "/settings",
+      (_req: ExpressRequest, res: ExpressResponse) => {
+        try {
+          const settings = this.settingsManager.getSettings();
+          res.status(200).json(settings);
+        } catch (error) {
+          logger.error(error, "Error getting settings");
+          res.status(500).json({
+            error: "Failed to get settings",
+          });
+        }
+      },
+    );
+
+    this.router.put(
+      "/settings",
+      (req: ExpressRequest, res: ExpressResponse) => {
+        try {
+          const settings = this.settingsManager.updateSettings(req.body);
+
+          // Update VeniceAI service if it's being used and settings changed
+          if (this.ttsService instanceof VeniceAI) {
+            if (req.body.veniceApiKey) {
+              this.ttsService.setApiKey(req.body.veniceApiKey);
+            }
+            if (req.body.veniceChatModel) {
+              this.ttsService.setDefaultChatModel(req.body.veniceChatModel);
+            }
+          }
+
+          res.status(200).json(settings);
+        } catch (error) {
+          logger.error(error, "Error updating settings");
+          res.status(500).json({
+            error: "Failed to update settings",
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      },
+    );
+
+    this.router.post(
+      "/settings/reset",
+      (_req: ExpressRequest, res: ExpressResponse) => {
+        try {
+          const settings = this.settingsManager.resetSettings();
+          res.status(200).json(settings);
+        } catch (error) {
+          logger.error(error, "Error resetting settings");
+          res.status(500).json({
+            error: "Failed to reset settings",
+          });
+        }
+      },
+    );
+
+    this.router.get(
+      "/models/chat",
+      async (_req: ExpressRequest, res: ExpressResponse) => {
+        try {
+          logger.debug("Fetching chat models from Venice API");
+
+          // Fetch models from Venice API
+          const response = await axios.get("https://api.venice.ai/api/v1/models", {
+            headers: {
+              'Accept': 'application/json',
+            },
+          });
+
+          // Filter for chat/completion models
+          const models = response.data.data
+            .filter((model: any) => {
+              // Include models that support chat/completions
+              const type = model.type || '';
+              return !['image', 'video', 'embedding', 'speech', 'transcription', 'tts'].includes(type) &&
+                     model.model_spec &&
+                     model.model_spec.name;
+            })
+            .map((model: any) => ({
+              id: model.id,
+              name: model.model_spec.name,
+              supportsResponseSchema: model.model_spec.capabilities?.supportsResponseSchema || false,
+              supportsFunctionCalling: model.model_spec.capabilities?.supportsFunctionCalling || false,
+            }));
+
+          logger.debug({ modelCount: models.length }, "Fetched chat models from Venice API");
+          res.status(200).json({ models });
+        } catch (error: unknown) {
+          logger.error(error, "Error fetching chat models from Venice API");
+
+          // Fallback to some popular models if API fetch fails
+          const fallbackModels = [
+            { id: "llama-3.3-70b", name: "Llama 3.3 70B", supportsResponseSchema: true, supportsFunctionCalling: false },
+            { id: "llama-3.3-70b-instruct", name: "Llama 3.3 70B Instruct", supportsResponseSchema: true, supportsFunctionCalling: true },
+            { id: "llama-3.1-405b", name: "Llama 3.1 405B", supportsResponseSchema: true, supportsFunctionCalling: false },
+            { id: "gpt-4o", name: "GPT-4o", supportsResponseSchema: true, supportsFunctionCalling: true },
+            { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", supportsResponseSchema: true, supportsFunctionCalling: true },
+          ];
+
+          res.status(200).json({ models: fallbackModels });
+        }
+      },
+    );
+
+    this.router.get(
+      "/models/video",
+      async (_req: ExpressRequest, res: ExpressResponse) => {
+        try {
+          logger.debug("Fetching video models from Venice API");
+
+          // Fetch video models from Venice API
+          const response = await axios.get("https://api.venice.ai/api/v1/models?type=video", {
+            headers: {
+              'Accept': 'application/json',
+            },
+          });
+
+          // Filter for text-to-video models using the model_spec.constraints.model_type field
+          // This is more reliable than parsing the model ID suffix
+          const models = response.data.data
+            .filter((model: any) => {
+              return model.model_spec?.constraints?.model_type === "text-to-video";
+            })
+            .map((model: any) => ({
+              id: model.id,
+              name: model.model_spec.name,
+            }));
+
+          logger.debug({ modelCount: models.length }, "Fetched video models from Venice API");
+          res.status(200).json({ models });
+        } catch (error: unknown) {
+          logger.error(error, "Error fetching video models from Venice API");
+
+          // Fallback to some known text-to-video models if API fetch fails
+          const fallbackModels = [
+            { id: "wan-2.6-text-to-video", name: "Wan 2.6" },
+            { id: "ltx-2-fast-text-to-video", name: "LTX Video 2.0 Fast" },
+            { id: "veo3-fast-text-to-video", name: "Veo 3 Fast" },
+          ];
+
+          res.status(200).json({ models: fallbackModels });
+        }
+      },
+    );
+
+    // AI Automation endpoints
+    this.router.post(
+      "/ai/generate-script",
+      async (req: ExpressRequest, res: ExpressResponse) => {
+        try {
+          const { topic, duration } = req.body;
+          if (!topic) {
+            res.status(400).json({ error: "Topic is required" });
+            return;
+          }
+
+          logger.info({ topic, duration }, "Generating script with AI");
+          const script = await this.shortCreator.generateScript(topic, duration || 30, this.config.veniceChatModel);
+          res.status(200).json({ script });
+        } catch (error) {
+          logger.error(error, "Error generating script");
+          res.status(500).json({
+            error: "Failed to generate script",
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      },
+    );
+
+    this.router.post(
+      "/ai/generate-search-terms",
+      async (req: ExpressRequest, res: ExpressResponse) => {
+        try {
+          const { text } = req.body;
+          if (!text) {
+            res.status(400).json({ error: "Text is required" });
+            return;
+          }
+
+          logger.info({ text }, "Generating search terms with AI");
+          const searchTerms = await this.shortCreator.generateSearchTerms(text, this.config.veniceChatModel);
+          res.status(200).json({ searchTerms });
+        } catch (error) {
+          logger.error(error, "Error generating search terms");
+          res.status(500).json({
+            error: "Failed to generate search terms",
+            message: error instanceof Error ? error.message : "Unknown error",
           });
         }
       },

@@ -4,7 +4,7 @@ import {
   type kokoroModelPrecision,
   type Voices,
 } from "../../types/shorts";
-import { TTSService, TTSResult } from "./TTSService"; // Import the interface
+import type { TTSService, TTSResult } from "./TTSService"; // Import the interface
 import { KOKORO_MODEL, logger } from "../../config";
 
 export class Kokoro implements TTSService { // Implement the interface
@@ -13,10 +13,12 @@ export class Kokoro implements TTSService { // Implement the interface
   async generate(
     text: string,
     voice: Voices,
+    speed: number = 1.0,
   ): Promise<TTSResult> { // Match the interface return type
     const splitter = new TextSplitterStream();
     const stream = this.tts.stream(splitter, {
       voice,
+      speed, // Add speed parameter
     });
     splitter.push(text);
     splitter.close();
@@ -30,11 +32,12 @@ export class Kokoro implements TTSService { // Implement the interface
     let audioLength = 0;
     for (const audio of output) {
       audioBuffers.push(audio.audio.toWav());
-      audioLength += audio.audio.audio.length / audio.audio.sampling_rate;
+      // Adjust audio length based on speed
+      audioLength += (audio.audio.audio.length / audio.audio.sampling_rate) / speed;
     }
 
     const mergedAudioBuffer = Kokoro.concatWavBuffers(audioBuffers);
-    logger.debug({ text, voice, audioLength }, "Audio generated with Kokoro");
+    logger.debug({ text, voice, speed, audioLength }, "Audio generated with Kokoro");
 
     return {
       audio: mergedAudioBuffer,

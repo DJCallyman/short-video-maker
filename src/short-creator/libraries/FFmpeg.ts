@@ -100,7 +100,7 @@ export class FFMpeg {
         });
     });
   }
-  
+
   async getVideoDuration(filePath: string): Promise<number> {
     return new Promise((resolve, reject) => {
       ffmpeg.ffprobe(filePath, (err, metadata) => {
@@ -123,7 +123,7 @@ export class FFMpeg {
         const subClipStartTime = startTime + i * subClipDuration;
         const subClipPath = path.join(tempDir, `subclip-${i}.mp4`);
         await this.extractClip(inputPath, subClipPath, subClipStartTime, subClipDuration);
-        
+
         const croppedSubClipPath = path.join(tempDir, `cropped-subclip-${i}.mp4`);
         await this.smartCrop(subClipPath, croppedSubClipPath, width, height, 0, subClipDuration, aspectRatio);
         croppedSubClipPaths.push(croppedSubClipPath);
@@ -184,9 +184,9 @@ export class FFMpeg {
             crop.height = newHeight;
         }
     }
-    
+
     logger.debug({ crop }, "Optimal crop determined by smartcrop.js");
-    
+
     // Sanitize the crop values to be integers and divisible by 2
     const safeCrop = {
         x: Math.round(crop.x),
@@ -201,7 +201,7 @@ export class FFMpeg {
       const command = ffmpeg(inputPath)
         .setStartTime(startTime)
         .setDuration(duration)
-        .videoFilter(`crop=${safeCrop.width}:${safeCrop.height}:${safeCrop.x}:${safeCrop.y}`)
+        .videoFilter(`crop=${safeCrop.width}:${safeCrop.height}:${safeCrop.x}:${safeCrop.y},scale=${width}:${height}`)
         .outputOptions('-c:v libx264')
         .outputOptions('-preset fast')
         .outputOptions('-pix_fmt yuv420p') // This is the fix for the white band
@@ -220,11 +220,11 @@ export class FFMpeg {
           fs.unlinkSync(framePath);
           reject(err);
         });
-        
+
       command.run();
     });
   }
-  
+
   async extractClip(inputPath: string, outputPath: string, startTime: number, duration: number): Promise<string> {
     logger.debug({ inputPath, outputPath, startTime, duration }, "Extracting video clip");
     return new Promise((resolve, reject) => {

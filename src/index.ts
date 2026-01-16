@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import path from "path";
 import fs from "fs-extra";
 
@@ -13,8 +12,11 @@ import { Server } from "./server/server";
 import { MusicManager } from "./short-creator/music";
 import { Kokoro } from "./short-creator/libraries/Kokoro";
 import { VeniceAI } from "./short-creator/libraries/VeniceAI";
-import { TTSService } from "./short-creator/libraries/TTSService";
+import { VeniceVideo } from "./short-creator/libraries/VeniceVideo";
+import type { TTSService } from "./short-creator/libraries/TTSService";
 import { PlexApi } from "./short-creator/libraries/PlexApi";
+import { ProgressTracker } from "./server/ProgressTracker";
+import { SettingsManager } from "./server/SettingsManager";
 
 async function main() {
   const config = new Config();
@@ -25,6 +27,7 @@ async function main() {
     process.exit(1);
   }
 
+  const settingsManager = new SettingsManager(config);
   const musicManager = new MusicManager(config);
   try {
     logger.debug("checking music files");
@@ -36,12 +39,15 @@ async function main() {
 
   logger.debug("initializing remotion");
   const remotion = await Remotion.init(config);
-  
+
   let ttsService: TTSService;
 
   if (config.ttsProvider === 'venice') {
     logger.debug("Initializing Venice AI TTS service");
-    ttsService = new VeniceAI(config.veniceApiKey!);
+    if (!config.veniceApiKey) {
+      throw new Error("Venice API key is required when TTS_PROVIDER is set to 'venice'");
+    }
+    ttsService = new VeniceAI(config.veniceApiKey, config.veniceChatModel);
   } else {
     logger.debug("Initializing Kokoro TTS service");
     const kokoroInstance = await Kokoro.init(config.kokoroModelPrecision);
@@ -54,6 +60,14 @@ async function main() {
   const ffmpeg = await FFMpeg.init(config);
   const pexelsApi = new PexelsAPI(config.pexelsApiKey);
   const plexApi = new PlexApi(process.env.PLEX_URL || '', process.env.PLEX_TOKEN || '');
+  const progressTracker = new ProgressTracker();
+
+  // Initialize Venice Video if API key is available
+  let veniceVideo: VeniceVideo | undefined;
+  if (config.veniceApiKey) {
+    logger.debug("Initializing Venice Video service");
+    veniceVideo = new VeniceVideo(config.veniceApiKey);
+  }
 
   logger.debug("initializing the short creator");
   const shortCreator = new ShortCreator(
@@ -65,6 +79,8 @@ async function main() {
     pexelsApi,
     musicManager,
     plexApi,
+    progressTracker,
+    veniceVideo,
   );
 
   if (!config.runningInDocker) {
@@ -102,8 +118,8 @@ async function main() {
   }
 
   logger.debug("initializing the server");
-  const server = new Server(config, shortCreator);
-  const app = server.start();
+  const server = new Server(config, shortCreator, progressTracker, settingsManager, ttsService);
+  server.start();
 }
 
 main().catch((error: unknown) => {
