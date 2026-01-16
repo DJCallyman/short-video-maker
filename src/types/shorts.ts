@@ -83,6 +83,19 @@ export enum MusicVolumeEnum {
   high = "high",
 }
 
+export enum TransitionEnum {
+  none = "none",
+  fade = "fade",
+  slide = "slide",
+}
+
+export enum CaptionAnimationEnum {
+  none = "none",
+  slideUp = "slideUp",
+  fadeIn = "fadeIn",
+  scale = "scale",
+}
+
 export const renderConfig = z.object({
   paddingBack: z
     .number()
@@ -115,8 +128,16 @@ export const renderConfig = z.object({
     .nativeEnum(MusicVolumeEnum)
     .optional()
     .describe("Volume of the music, default is high"),
-  videoSource: z.enum(["pexels", "plex"]).optional().describe("The source for the video clips"),
+  videoSource: z.enum(["pexels", "plex", "venice-ai"]).optional().describe("The source for the video clips"),
   plexMovieId: z.string().optional().describe("The ID of the Plex movie to use if the source is 'plex'"),
+  veniceVideoModel: z.string().optional().describe("The Venice AI model to use for video generation (e.g., mochi-1-text-to-video, wan-2.5-preview-image-to-video)"),
+  ttsSpeed: z.number().min(0.25).max(4.0).optional().describe("TTS speed multiplier (0.25-4.0), default is 1.0"),
+  transition: z.nativeEnum(TransitionEnum).optional().describe("Transition effect between scenes"),
+  transitionDuration: z.number().optional().describe("Duration of transitions in milliseconds, default is 500"),
+  captionAnimation: z.nativeEnum(CaptionAnimationEnum).optional().describe("Animation effect for captions"),
+  captionFontSize: z.string().optional().describe("Font size for captions (CSS value), default is 6em for portrait, 8em for landscape"),
+  captionFontFamily: z.string().optional().describe("Font family for captions, default is Barlow Condensed"),
+  kenBurnsEffect: z.boolean().optional().describe("Enable Ken Burns (zoom/pan) effect on videos"),
 });
 export type RenderConfig = z.infer<typeof renderConfig>;
 

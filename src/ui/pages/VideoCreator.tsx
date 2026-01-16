@@ -24,9 +24,15 @@ import {
   List,
   ListItem,
   ListItemText,
+  ListItemButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
+import FileUploadIcon from "@mui/icons-material/FileUpload";
 import {
   SceneInput,
   RenderConfig,
@@ -34,6 +40,8 @@ import {
   CaptionPositionEnum,
   OrientationEnum,
   MusicVolumeEnum,
+  TransitionEnum,
+  CaptionAnimationEnum,
 } from "../../types/shorts";
 
 interface SceneFormData {
@@ -66,23 +74,29 @@ const VideoCreator: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [voices, setVoices] = useState<string[]>([]);
   const [musicTags, setMusicTags] = useState<MusicMoodEnum[]>([]);
+  const [videoModels, setVideoModels] = useState<Array<{ id: string; name: string }>>([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [videoSource, setVideoSource] = useState("pexels");
   const [plexMovies, setPlexMovies] = useState<PlexMovie[]>([]);
   const [selectedPlexMovie, setSelectedPlexMovie] = useState<string | null>(null);
   const [loadingPlexMovies, setLoadingPlexMovies] = useState(false);
   const [plexSearch, setPlexSearch] = useState("");
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [jsonInput, setJsonInput] = useState("");
+  const [importError, setImportError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchOptions = async () => {
       try {
-        const [voicesResponse, musicResponse] = await Promise.all([
+        const [voicesResponse, musicResponse, videoModelsResponse] = await Promise.all([
           axios.get("/api/voices"),
           axios.get("/api/music-tags"),
+          axios.get("/api/models/video"),
         ]);
         const fetchedVoices = voicesResponse.data || [];
         setVoices(fetchedVoices);
         setMusicTags(musicResponse.data);
+        setVideoModels(videoModelsResponse.data.models || []);
         if (fetchedVoices.length > 0) {
           setConfig((prevConfig) => ({
             ...prevConfig,
@@ -151,6 +165,41 @@ const VideoCreator: React.FC = () => {
     setConfig((prevConfig) => ({ ...prevConfig, plexMovieId: movieId }));
   };
 
+  const handleImportJson = () => {
+    setImportError(null);
+    try {
+      const parsed = JSON.parse(jsonInput);
+
+      // Validate the JSON structure
+      if (!parsed.scenes || !Array.isArray(parsed.scenes)) {
+        throw new Error("JSON must contain a 'scenes' array");
+      }
+
+      // Convert scenes to form format
+      const importedScenes: SceneFormData[] = parsed.scenes.map((scene: any) => ({
+        text: scene.text || "",
+        searchTerms: Array.isArray(scene.searchTerms)
+          ? scene.searchTerms.join(", ")
+          : "",
+      }));
+
+      setScenes(importedScenes);
+
+      // Import config if present
+      if (parsed.config) {
+        setConfig((prevConfig) => ({
+          ...prevConfig,
+          ...parsed.config,
+        }));
+      }
+
+      setImportDialogOpen(false);
+      setJsonInput("");
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Invalid JSON format");
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -164,7 +213,7 @@ const VideoCreator: React.FC = () => {
           .map((term) => term.trim())
           .filter((term) => term.length > 0),
       }));
-      
+
       const submissionConfig = {
         ...config,
         videoSource: videoSource as "pexels" | "plex",
@@ -184,7 +233,7 @@ const VideoCreator: React.FC = () => {
       setLoading(false);
     }
   };
-  
+
   const filteredPlexMovies = plexMovies.filter(movie => movie.title.toLowerCase().includes(plexSearch.toLowerCase()));
 
   if (loadingOptions) {
@@ -227,42 +276,94 @@ const VideoCreator: React.FC = () => {
               <FormControlLabel
                 value="pexels"
                 control={<Radio />}
-                label="Pexels"
+                label="Pexels (Stock Footage)"
               />
               <FormControlLabel
                 value="plex"
                 control={<Radio />}
-                label="Plex"
+                label="Plex (Your Movies)"
+              />
+              <FormControlLabel
+                value="venice-ai"
+                control={<Radio />}
+                label="Venice AI (Generated)"
               />
             </RadioGroup>
           </FormControl>
           <Collapse in={videoSource === "plex"}>
-            <TextField
-                fullWidth
-                label="Search Plex Movies"
-                variant="outlined"
-                value={plexSearch}
-                onChange={(e) => setPlexSearch(e.target.value)}
-                sx={{ mt: 2, mb: 2 }}
-              />
-            {loadingPlexMovies ? (
-              <CircularProgress />
-            ) : (
-              <Box sx={{ maxHeight: 300, overflow: 'auto', border: '1px solid #ccc', borderRadius: 1 }}>
-                <List dense>
-                  {filteredPlexMovies.map((movie) => (
-                    <ListItem
-                      key={movie.id}
-                      button
-                      selected={selectedPlexMovie === movie.id}
-                      onClick={() => handleSelectPlexMovie(movie.id)}
-                    >
-                      <ListItemText primary={`${movie.title} (${movie.year})`} />
-                    </ListItem>
-                  ))}
-                </List>
+            {selectedPlexMovie && !plexSearch ? (
+              <Box sx={{ mt: 2, mb: 2 }}>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  Selected Movie:
+                </Typography>
+                <Paper variant="outlined" sx={{ p: 2 }}>
+                  <Typography variant="body1">
+                    {plexMovies.find(m => m.id === selectedPlexMovie)?.title} ({plexMovies.find(m => m.id === selectedPlexMovie)?.year})
+                  </Typography>
+                  <Button
+                    size="small"
+                    onClick={() => setSelectedPlexMovie(null)}
+                    sx={{ mt: 1 }}
+                  >
+                    Change Movie
+                  </Button>
+                </Paper>
               </Box>
+            ) : (
+              <>
+                <TextField
+                  fullWidth
+                  label="Search Plex Movies"
+                  variant="outlined"
+                  value={plexSearch}
+                  onChange={(e) => setPlexSearch(e.target.value)}
+                  sx={{ mt: 2, mb: 2 }}
+                />
+                {loadingPlexMovies ? (
+                  <CircularProgress />
+                ) : (
+                  <Box sx={{ maxHeight: 300, overflow: 'auto', border: '1px solid #ccc', borderRadius: 1 }}>
+                    <List dense>
+                      {filteredPlexMovies.map((movie) => (
+                        <ListItemButton
+                          key={movie.id}
+                          selected={selectedPlexMovie === movie.id}
+                          onClick={() => {
+                            handleSelectPlexMovie(movie.id);
+                            setPlexSearch("");
+                          }}
+                        >
+                          <ListItemText primary={`${movie.title} (${movie.year})`} />
+                        </ListItemButton>
+                      ))}
+                    </List>
+                  </Box>
+                )}
+              </>
             )}
+          </Collapse>
+          <Collapse in={videoSource === "venice-ai"}>
+            <Box sx={{ mt: 2 }}>
+              <FormControl fullWidth>
+                <InputLabel>Venice AI Video Model</InputLabel>
+                <Select
+                  value={config.veniceVideoModel || (videoModels.length > 0 ? videoModels[0].id : "")}
+                  onChange={(e) => handleConfigChange("veniceVideoModel", e.target.value)}
+                  label="Venice AI Video Model"
+                  disabled={videoModels.length === 0}
+                >
+                  {videoModels.length > 0 ? (
+                    videoModels.map((model) => (
+                      <MenuItem key={model.id} value={model.id}>
+                        {model.name}
+                      </MenuItem>
+                    ))
+                  ) : (
+                    <MenuItem value="">Loading models...</MenuItem>
+                  )}
+                </Select>
+              </FormControl>
+            </Box>
           </Collapse>
         </Paper>
 
@@ -321,13 +422,20 @@ const VideoCreator: React.FC = () => {
           </Paper>
         ))}
 
-        <Box display="flex" justifyContent="center" mb={4}>
+        <Box display="flex" justifyContent="center" gap={2} mb={4}>
           <Button
             variant="outlined"
             startIcon={<AddIcon />}
             onClick={handleAddScene}
           >
             Add Scene
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<FileUploadIcon />}
+            onClick={() => setImportDialogOpen(true)}
+          >
+            Import JSON
           </Button>
         </Box>
 
@@ -460,6 +568,75 @@ const VideoCreator: React.FC = () => {
                 </Select>
               </FormControl>
             </Grid>
+
+            {/* New Enhancement Fields */}
+            <Grid item xs={12}>
+              <Divider sx={{ my: 2 }}>
+                <Typography variant="caption" color="text.secondary">
+                  AI & Visual Enhancements
+                </Typography>
+              </Divider>
+            </Grid>
+
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>Transition Effect</InputLabel>
+                <Select
+                  value={config.transition || TransitionEnum.none}
+                  onChange={(e) => handleConfigChange("transition", e.target.value)}
+                  label="Transition Effect"
+                >
+                  {Object.values(TransitionEnum).map((transition) => (
+                    <MenuItem key={transition} value={transition}>
+                      {transition}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>Caption Animation</InputLabel>
+                <Select
+                  value={config.captionAnimation || CaptionAnimationEnum.none}
+                  onChange={(e) => handleConfigChange("captionAnimation", e.target.value)}
+                  label="Caption Animation"
+                >
+                  {Object.values(CaptionAnimationEnum).map((animation) => (
+                    <MenuItem key={animation} value={animation}>
+                      {animation}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="TTS Speed"
+                value={config.ttsSpeed || 1.0}
+                onChange={(e) => handleConfigChange("ttsSpeed", parseFloat(e.target.value))}
+                inputProps={{ min: 0.25, max: 4.0, step: 0.25 }}
+                helperText="Speech speed (0.25x - 4.0x)"
+              />
+            </Grid>
+
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>Ken Burns Effect</InputLabel>
+                <Select
+                  value={config.kenBurnsEffect ? "true" : "false"}
+                  onChange={(e) => handleConfigChange("kenBurnsEffect", e.target.value === "true")}
+                  label="Ken Burns Effect"
+                >
+                  <MenuItem value="false">Disabled</MenuItem>
+                  <MenuItem value="true">Enabled (Zoom & Pan)</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
           </Grid>
         </Paper>
 
@@ -480,6 +657,78 @@ const VideoCreator: React.FC = () => {
           </Button>
         </Box>
       </form>
+
+      {/* Import JSON Dialog */}
+      <Dialog
+        open={importDialogOpen}
+        onClose={() => {
+          setImportDialogOpen(false);
+          setJsonInput("");
+          setImportError(null);
+        }}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Import JSON</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Paste your JSON with scenes and config. Expected format:
+          </Typography>
+          <Typography
+            variant="caption"
+            component="pre"
+            sx={{
+              backgroundColor: "grey.100",
+              p: 1,
+              borderRadius: 1,
+              mb: 2,
+              fontSize: "0.75rem",
+              overflow: "auto",
+            }}
+          >
+            {`{
+  "scenes": [
+    {
+      "text": "Scene text",
+      "searchTerms": ["term1", "term2"]
+    }
+  ],
+  "config": {
+    "orientation": "portrait"
+  }
+}`}
+          </Typography>
+          <TextField
+            fullWidth
+            multiline
+            rows={12}
+            value={jsonInput}
+            onChange={(e) => setJsonInput(e.target.value)}
+            placeholder="Paste JSON here..."
+            variant="outlined"
+            sx={{ fontFamily: "monospace" }}
+          />
+          {importError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {importError}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setImportDialogOpen(false);
+              setJsonInput("");
+              setImportError(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button onClick={handleImportJson} variant="contained">
+            Import
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

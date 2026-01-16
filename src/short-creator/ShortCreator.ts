@@ -1,22 +1,23 @@
-// src/short-creator/ShortCreator.ts
-
 import { OrientationEnum } from "./../types/shorts";
 /* eslint-disable @remotion/deterministic-randomness */
 import fs from "fs-extra";
 import cuid from "cuid";
 import path from "path";
 import https from "https";
-import http from "http";
+import type http from "http";
 
-import { TTSService } from "./libraries/TTSService";
-import { Remotion } from "./libraries/Remotion";
-import { Whisper } from "./libraries/Whisper";
-import { FFMpeg } from "./libraries/FFmpeg";
-import { PexelsAPI } from "./libraries/Pexels";
-import { PlexApi } from "./libraries/PlexApi";
-import { Config } from "../config";
+import type { TTSService } from "./libraries/TTSService";
+import type { Remotion } from "./libraries/Remotion";
+import type { Whisper } from "./libraries/Whisper";
+import type { FFMpeg } from "./libraries/FFmpeg";
+import type { PexelsAPI } from "./libraries/Pexels";
+import type { PlexApi } from "./libraries/PlexApi";
+import type { VeniceVideo, VeniceVideoModel } from "./libraries/VeniceVideo";
+import { VeniceAI } from "./libraries/VeniceAI";
+import type { Config } from "../config";
 import { logger } from "../logger";
-import { MusicManager } from "./music";
+import type { MusicManager } from "./music";
+import type { ProgressTracker } from "../server/ProgressTracker";
 import type {
   SceneInput,
   RenderConfig,
@@ -45,6 +46,8 @@ export class ShortCreator {
     private pexelsApi: PexelsAPI,
     private musicManager: MusicManager,
     private plexApi: PlexApi,
+    private progressTracker: ProgressTracker,
+    private veniceVideo?: VeniceVideo,
   ) {}
 
   public status(id: string): VideoStatus {
@@ -71,6 +74,28 @@ export class ShortCreator {
     return id;
   }
 
+  /**
+   * Generate a video script using AI
+   */
+  public async generateScript(topic: string, durationSeconds: number = 30, chatModel?: string): Promise<Array<{text: string; searchTerms: string[]}>> {
+    if (!(this.ttsService instanceof VeniceAI)) {
+      throw new Error("Script generation requires Venice AI TTS provider");
+    }
+    logger.debug({ topic, durationSeconds }, "Generating script with AI");
+    return await this.ttsService.generateScript(topic, durationSeconds, chatModel);
+  }
+
+  /**
+   * Generate search terms for a text using AI
+   */
+  public async generateSearchTerms(text: string, chatModel?: string): Promise<string[]> {
+    if (!(this.ttsService instanceof VeniceAI)) {
+      throw new Error("Search term generation requires Venice AI TTS provider");
+    }
+    logger.debug({ text }, "Generating search terms with AI");
+    return await this.ttsService.generateSearchTerms(text, 3, chatModel);
+  }
+
   private async processQueue(): Promise<void> {
     if (this.queue.length === 0) {
       return;
@@ -85,6 +110,15 @@ export class ShortCreator {
       logger.debug({ id }, "Video created successfully");
     } catch (error: unknown) {
       logger.error(error, "Error creating video");
+
+      // Update progress tracker with error
+      this.progressTracker.updateProgress({
+        videoId: id,
+        stage: 'error',
+        progress: 0,
+        message: 'Failed to create video',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
     } finally {
       this.queue.shift();
       this.processQueue();
@@ -103,6 +137,14 @@ export class ShortCreator {
       },
       "Creating short video",
     );
+
+    this.progressTracker.updateProgress({
+      videoId,
+      stage: 'queued',
+      progress: 0,
+      message: 'Starting video creation...',
+    });
+
     const scenes: Scene[] = [];
     let totalDuration = 0;
     const excludeVideoIds: string[] = [];
@@ -125,12 +167,22 @@ export class ShortCreator {
     if (sourceVideoPath) {
         movieDuration = await this.ffmpeg.getVideoDuration(sourceVideoPath);
     }
-    
+
     let index = 0;
     for (const scene of inputScenes) {
+      const sceneProgress = Math.round((index / inputScenes.length) * 70); // 0-70% for scene processing
+
+      this.progressTracker.updateProgress({
+        videoId,
+        stage: 'generating_audio',
+        progress: sceneProgress,
+        message: `Generating audio for scene ${index + 1}/${inputScenes.length}...`,
+      });
+
       const audio = await this.ttsService.generate(
         scene.text,
         config.voice ?? "af_heart",
+        config.ttsSpeed ?? 1.0,
       );
       let { audioLength } = audio;
       const { audio: audioStream } = audio;
@@ -147,23 +199,95 @@ export class ShortCreator {
       tempFiles.push(tempWavPath, tempMp3Path);
 
       await this.ffmpeg.saveNormalizedAudio(audioStream, tempWavPath);
+
+      this.progressTracker.updateProgress({
+        videoId,
+        stage: 'transcribing',
+        progress: sceneProgress + 5,
+        message: `Transcribing audio for scene ${index + 1}/${inputScenes.length}...`,
+      });
+
       const captions = await this.whisper.CreateCaption(tempWavPath);
       await this.ffmpeg.saveToMp3(audioStream, tempMp3Path);
 
+      this.progressTracker.updateProgress({
+        videoId,
+        stage: 'fetching_videos',
+        progress: sceneProgress + 10,
+        message: `Fetching video for scene ${index + 1}/${inputScenes.length}...`,
+      });
+
       let videoUrl: string;
 
-      if (sourceVideoPath && movieDuration > 0) {
+      if (config.videoSource === 'venice-ai' && this.veniceVideo) {
+        logger.debug("Generating video with Venice AI");
+
+        const videoPrompt = scene.text || `Video about ${scene.searchTerms}`;
+        const videoModel = (config.veniceVideoModel || 'mochi-1-text-to-video') as VeniceVideoModel;
+
+        // Determine aspect ratio based on orientation
+        const aspectRatio = config.orientation === 'portrait' ? '9:16' : '16:9';
+
+        logger.info(`Venice AI video generation - Model: ${videoModel}, Orientation: ${config.orientation}, Aspect Ratio: ${aspectRatio}, Prompt: "${videoPrompt}"`);
+
+        const veniceVideoUrl = await this.veniceVideo.generateTextToVideo(videoPrompt, {
+          model: videoModel,
+          aspectRatio: aspectRatio as any,
+        });
+
+        const tempVideoFileName = `${cuid()}.mp4`;
+        const tempVideoPath = path.join(this.config.tempDirPath, tempVideoFileName);
+        tempFiles.push(tempVideoPath);
+
+        // Handle data URLs (base64 encoded videos)
+        if (veniceVideoUrl.startsWith('data:')) {
+          const matches = veniceVideoUrl.match(/^data:(.+?);base64,(.+)$/);
+          if (!matches) {
+            throw new Error('Invalid data URL format from Venice video API');
+          }
+          const base64Data = matches[2];
+          const buffer = Buffer.from(base64Data, 'base64');
+          await fs.promises.writeFile(tempVideoPath, buffer);
+          logger.debug(`Decoded base64 video (${buffer.length} bytes) to ${tempVideoPath}`);
+        } else {
+          // Handle HTTPS URLs
+          // Handle HTTPS URLs
+          await new Promise<void>((resolve, reject) => {
+            const fileStream = fs.createWriteStream(tempVideoPath);
+            https
+              .get(veniceVideoUrl, (response: http.IncomingMessage) => {
+                if (response.statusCode !== 200) {
+                  reject(new Error(`Failed to download Venice video: ${response.statusCode}`));
+                  return;
+                }
+                response.pipe(fileStream);
+                fileStream.on("finish", () => {
+                  fileStream.close();
+                  logger.debug(`Venice video downloaded to ${tempVideoPath}`);
+                  resolve();
+                });
+              })
+              .on("error", (err: Error) => {
+                fs.unlink(tempVideoPath, () => {});
+                logger.error(err, "Error downloading Venice video");
+                reject(err);
+              });
+          });
+        }
+
+        videoUrl = `http://localhost:${this.config.port}/api/tmp/${tempVideoFileName}`;
+      } else if (sourceVideoPath && movieDuration > 0) {
         const clipDuration = audioLength + durationBufferSeconds;
         const randomStartTime = Math.random() * (movieDuration - clipDuration);
-        
+
         const tempClipFileName = `${cuid()}.mp4`;
         const tempClipPath = path.join(this.config.tempDirPath, tempClipFileName);
-        
+
         const { width, height } = getOrientationConfig(orientation);
         const aspectRatio = width / height;
 
         await this.ffmpeg.dynamicCrop(sourceVideoPath, tempClipPath, width, height, randomStartTime, clipDuration, aspectRatio);
-        
+
         tempFiles.push(tempClipPath);
         videoUrl = `http://localhost:${this.config.port}/api/tmp/${tempClipFileName}`;
       } else {
@@ -175,7 +299,7 @@ export class ShortCreator {
         );
 
         logger.debug(`Downloading video from ${pexelsVideo.url}`);
-        
+
         const tempVideoFileName = `${cuid()}.mp4`;
         const tempVideoPath = path.join(this.config.tempDirPath, tempVideoFileName);
         tempFiles.push(tempVideoPath);
@@ -203,7 +327,7 @@ export class ShortCreator {
               reject(err);
             });
         });
-        
+
         excludeVideoIds.push(pexelsVideo.id);
         videoUrl = `http://localhost:${this.config.port}/api/tmp/${tempVideoFileName}`;
       }
@@ -225,8 +349,22 @@ export class ShortCreator {
       totalDuration += config.paddingBack / 1000;
     }
 
+    this.progressTracker.updateProgress({
+      videoId,
+      stage: 'composing',
+      progress: 75,
+      message: 'Composing video with music...',
+    });
+
     const selectedMusic = this.findMusic(totalDuration, config.music);
     logger.debug({ selectedMusic }, "Selected music for the video");
+
+    this.progressTracker.updateProgress({
+      videoId,
+      stage: 'rendering',
+      progress: 80,
+      message: 'Rendering final video...',
+    });
 
     await this.remotion.render(
       {
@@ -245,6 +383,13 @@ export class ShortCreator {
       videoId,
       orientation,
     );
+
+    this.progressTracker.updateProgress({
+      videoId,
+      stage: 'complete',
+      progress: 100,
+      message: 'Video creation complete!',
+    });
 
     for (const file of tempFiles) {
       fs.removeSync(file);
@@ -271,10 +416,10 @@ export class ShortCreator {
     return fs.readFileSync(videoPath);
   }
 
-  private findMusic(videoDuration: number, tag?: MusicMoodEnum): MusicForVideo {
+  private findMusic(videoDuration: number, _tag?: MusicMoodEnum): MusicForVideo {
     const musicFiles = this.musicManager.musicList().filter((music) => {
-      if (tag) {
-        return music.mood === tag;
+      if (_tag) {
+        return music.mood === _tag;
       }
       return true;
     });
@@ -317,5 +462,11 @@ export class ShortCreator {
 
   public ListAvailableVoices(): string[] {
     return this.ttsService.listAvailableVoices();
+  }
+
+  public async generateVoicePreview(text: string, voice: string): Promise<ArrayBuffer> {
+    logger.debug({ text, voice }, "Generating voice preview");
+    const result = await this.ttsService.generate(text, voice);
+    return result.audio;
   }
 }
