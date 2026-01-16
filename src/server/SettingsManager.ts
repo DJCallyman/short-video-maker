@@ -53,9 +53,11 @@ export class SettingsManager {
 
   /**
    * Apply loaded settings to the config object
+   * Priority: Environment variable > Settings file > Config default
    */
   private applySettingsToConfig(): void {
-    if (this.settings.veniceApiKey !== undefined) {
+    // Only override with settings file if env var isn't set
+    if (this.settings.veniceApiKey !== undefined && !process.env.VENICE_API_KEY) {
       this.config.veniceApiKey = this.settings.veniceApiKey;
     }
     if (this.settings.veniceChatModel !== undefined) {
@@ -67,7 +69,8 @@ export class SettingsManager {
     if (this.settings.transcriptionProvider !== undefined) {
       this.config.transcriptionProvider = this.settings.transcriptionProvider;
     }
-    if (this.settings.pexelsApiKey !== undefined) {
+    // Only override with settings file if env var isn't set
+    if (this.settings.pexelsApiKey !== undefined && !process.env.PEXELS_API_KEY) {
       this.config.pexelsApiKey = this.settings.pexelsApiKey;
     }
   }
@@ -106,8 +109,19 @@ export class SettingsManager {
 
   /**
    * Update settings
+   * Environment variables always take priority
    */
   updateSettings(newSettings: Partial<AppSettings>): AppSettings {
+    // Don't allow overriding env vars through settings
+    if (process.env.VENICE_API_KEY && newSettings.veniceApiKey) {
+      logger.warn('VENICE_API_KEY is set as environment variable, ignoring settings file value');
+      delete newSettings.veniceApiKey;
+    }
+    if (process.env.PEXELS_API_KEY && newSettings.pexelsApiKey) {
+      logger.warn('PEXELS_API_KEY is set as environment variable, ignoring settings file value');
+      delete newSettings.pexelsApiKey;
+    }
+
     this.settings = {
       ...this.settings,
       ...newSettings,
