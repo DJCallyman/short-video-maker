@@ -120,12 +120,33 @@ const AITools: React.FC = () => {
     }
   };
 
-  const copyScriptToClipboard = () => {
+  const copyScriptToClipboard = async () => {
     const scriptText = JSON.stringify({
       scenes: generatedScript,
       config: { orientation: 'portrait' }
     }, null, 2);
-    navigator.clipboard.writeText(scriptText);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(scriptText);
+        // Optional: Show success message
+      } catch (error) {
+        console.error('Copy failed:', error);
+        // Optional: Fallback or error handling
+      }
+    } else {
+      // Fallback for older browsers or non-secure contexts
+      const textArea = document.createElement('textarea');
+      textArea.value = scriptText;
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        // Optional: Show success message
+      } catch (error) {
+        console.error('Fallback copy failed:', error);
+      }
+      document.body.removeChild(textArea);
+    }
   };
 
   return (
